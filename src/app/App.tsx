@@ -538,9 +538,11 @@ function CountdownSection() {
 // ─── Atur Cara Section ────────────────────────────────────────────────────────
 function AturCaraSection() {
   const events = [
-    { time: "12.00 PM", label: "Ketibaan Para Jemputan" },
-    { time: "12.30 PM", label: "Perarakan Pengantin & Makan Beradab" },
-    { time: "04.00 PM", label: "Majlis Bersurai" },
+    { time: "12:00", label: "Ketibaan Tetamu" },
+    { time: "12:30", label: "Ketibaan Pengantin" },
+    { time: "1:00", label: "Makan Beradab" },
+    { time: "2:00", label: "Sesi Bergambar" },
+    { time: "4:00", label: "Majlis Tamat" },
   ];
 
   return (
@@ -566,10 +568,11 @@ function AturCaraSection() {
 function HorizontalImageStack() {
   const reduceMotion = useReducedMotion();
   const galleryImages = [
-    { src: "/Opening Gate Background.png", label: "Opening gate background" },
-    { src: "/Main Page.png", label: "Main wedding invitation artwork" },
-    { src: "/Background Second Page.png", label: "Walimatulurus invitation paper" },
-    { src: "/Background Last page.png", label: "RSVP and gift closing artwork" },
+    { src: "/gallery-1.jpg", label: "Tangan pengantin memegang jambangan bunga" },
+    { src: "/gallery-2.jpg", label: "Pasangan pengantin duduk bersanding" },
+    { src: "/gallery-3.jpg", label: "Cincin perkahwinan dan jambangan bunga" },
+    { src: "/gallery-4.jpg", label: "Pengantin bersama ibu di pelamin" },
+    { src: "/gallery-5.jpg", label: "Pasangan pengantin di pelamin" },
   ];
   const [active, setActive] = useState(0);
 
