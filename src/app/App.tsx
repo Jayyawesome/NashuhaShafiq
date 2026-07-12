@@ -1,0 +1,1165 @@
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import {
+  MapPin,
+  Phone,
+  Calendar,
+  Heart,
+  Music,
+  Mail,
+  Gift,
+  Clock,
+  Navigation,
+  MessageSquare,
+  Play,
+  Pause,
+  X,
+  ChevronLeft,
+  ChevronRight
+} from "lucide-react";
+import { PersistentYouTubePlayer } from "../components/PersistentYouTubePlayer";
+import type { YouTubeControllerHandle, YouTubePlaybackState } from "../components/PersistentYouTubePlayer";
+import { attendanceOptions, seedWishes } from "../lib/rsvp";
+import type { AttendanceStatus, RsvpSubmission } from "../lib/rsvp";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const musicUrl = "https://youtu.be/ZeFpigRaXbI?si=HgKqlOVWbGeV0twY";
+const musicStartAt = "01:53";
+const eventDateTime = "2026-08-22T12:00:00+08:00";
+
+const eventDetails = {
+  title: "Majlis Perkahwinan Nashuha & Shafiq",
+  dateISO: "2026-08-22",
+  dateLabel: "Sabtu, 22 Ogos 2026",
+  startTime: "12:00",
+  endTime: "16:00",
+  timeLabel: "12 tengah hari - 4 petang",
+  venueName: "Kulim Golf Resort & Country",
+  venueAddress: "Persiaran Kulim Golf, Kulim Hi-Tech Park, 09000 Kulim, Kedah",
+};
+
+const contacts = [
+  { name: "Sarina", relation: "Ibu", phone: "0194778469" },
+  { name: "Jeffri", relation: "Bapa", phone: "0135895304" },
+  { name: "Syazwani", relation: "Kakak", phone: "0194013804" },
+];
+
+const giftDetails = {
+  title: "Money Gift",
+  recipient: "Fatin Nashuha Binti Jeffri",
+  bank: "Maklumat akaun akan dikemaskini",
+  note: "Untuk hadiah atau pertanyaan, sila hubungi pihak keluarga melalui WhatsApp.",
+};
+
+const fontStyle = `
+  .font-playfair { font-family: 'Playfair Display', Georgia, serif; }
+  .font-greatvibes { font-family: 'Great Vibes', cursive; }
+  .font-montserrat { font-family: 'Montserrat', sans-serif; }
+  html, body { margin: 0; padding: 0; overflow-x: hidden; background: #2f0714; }
+  ::-webkit-scrollbar { width: 0px; }
+`;
+
+type DockPanel = "time" | "location" | "rsvp" | "gift" | "contact" | "music";
+type CountdownParts = { days: number; hours: number; minutes: number; seconds: number };
+type RsvpFormState = { name: string; attendance: AttendanceStatus; pax: number; phone: string; wish: string };
+
+const initialForm: RsvpFormState = {
+  name: "",
+  attendance: "Hadir",
+  pax: 1,
+  phone: "",
+  wish: "",
+};
+
+const rsvpStorageKey = "nashuha-shafiq-rsvp-submissions";
+
+function readStoredWishes() {
+  try {
+    const stored = window.localStorage.getItem(rsvpStorageKey);
+    if (!stored) return seedWishes;
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed) ? (parsed as RsvpSubmission[]) : seedWishes;
+  } catch {
+    return seedWishes;
+  }
+}
+
+function writeStoredWishes(submissions: RsvpSubmission[]) {
+  window.localStorage.setItem(rsvpStorageKey, JSON.stringify(submissions));
+}
+
+function createRsvpSubmission(form: RsvpFormState): RsvpSubmission {
+  return {
+    timestamp: new Date().toISOString(),
+    name: form.name.trim(),
+    attendance: form.attendance,
+    pax: form.pax,
+    phone: form.phone.trim(),
+    wish: form.wish.trim(),
+    source: "Browser",
+  };
+}
+
+function malaysiaPhoneLinks(phone: string) {
+  const digits = phone.replace(/\D/g, "");
+  const international = digits.startsWith("0") ? `60${digits.slice(1)}` : digits;
+  return {
+    tel: `tel:+${international}`,
+    whatsapp: `https://wa.me/${international}`,
+  };
+}
+
+function calendarDetails() {
+  const date = eventDetails.dateISO.replaceAll("-", "");
+  const start = eventDetails.startTime.replace(":", "") + "00";
+  const end = eventDetails.endTime.replace(":", "") + "00";
+  const location = `${eventDetails.venueName}, ${eventDetails.venueAddress}`;
+  const google = new URL("https://calendar.google.com/calendar/render");
+  google.searchParams.set("action", "TEMPLATE");
+  google.searchParams.set("text", eventDetails.title);
+  google.searchParams.set("dates", `${date}T${start}/${date}T${end}`);
+  google.searchParams.set("location", location);
+  google.searchParams.set("details", "Jemputan perkahwinan Fatin Nashuha Binti Jeffri dan Mohamad Shafiq Bin Mohd Shakri.");
+  
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "BEGIN:VEVENT",
+    `DTSTART:${date}T${start}`,
+    `DTEND:${date}T${end}`,
+    `SUMMARY:${eventDetails.title}`,
+    `LOCATION:${location}`,
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\r\n");
+  
+  return { google: google.toString(), ics };
+}
+
+function downloadCalendar() {
+  const { ics } = calendarDetails();
+  const url = URL.createObjectURL(new Blob([ics], { type: "text/calendar;charset=utf-8" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "nashuha-shafiq.ics";
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function mapLinks() {
+  const query = encodeURIComponent(`${eventDetails.venueName}, ${eventDetails.venueAddress}`);
+  return {
+    google: `https://www.google.com/maps/search/?api=1&query=${query}`,
+    waze: `https://waze.com/ul?q=${query}&navigate=yes`,
+  };
+}
+
+function getCountdownParts(): CountdownParts {
+  const remaining = Math.max(0, new Date(eventDateTime).getTime() - Date.now());
+  const secondsTotal = Math.floor(remaining / 1000);
+  return {
+    days: Math.floor(secondsTotal / 86400),
+    hours: Math.floor((secondsTotal % 86400) / 3600),
+    minutes: Math.floor((secondsTotal % 3600) / 60),
+    seconds: secondsTotal % 60,
+  };
+}
+
+function formatTwoDigits(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+// ─── Sparkle component ────────────────────────────────────────────────────────
+function Sparkle({ x, y, delay }: { x: number; y: number; delay: number }) {
+  return (
+    <motion.div
+      className="absolute pointer-events-none"
+      style={{ left: `${x}%`, top: `${y}%` }}
+      initial={{ opacity: 0, scale: 0 }}
+      animate={{ opacity: [0, 1, 0], scale: [0, 1, 0] }}
+      transition={{ duration: 2.5, delay, repeat: Infinity, repeatDelay: Math.random() * 4 + 2 }}
+    >
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+        <path d="M6 0L7 5L12 6L7 7L6 12L5 7L0 6L5 5L6 0Z" fill="#b8894a" opacity="0.6" />
+      </svg>
+    </motion.div>
+  );
+}
+
+// ─── Ornament divider ─────────────────────────────────────────────────────────
+function OrnamentDivider() {
+  return (
+    <div className="flex items-center justify-center gap-3 py-2 w-full">
+      <div className="h-px flex-1 bg-gradient-to-r from-transparent to-amber-500/30" />
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+        <path d="M10 2C10 2 7 6 4 10C7 14 10 18 10 18C10 18 13 14 16 10C13 6 10 2 10 2Z" stroke="#b8894a" strokeWidth="0.8" fill="none" />
+        <circle cx="10" cy="10" r="1.5" fill="#b8894a" />
+      </svg>
+      <div className="h-px flex-1 bg-gradient-to-l from-transparent to-amber-500/30" />
+    </div>
+  );
+}
+
+// ─── Animated Section ─────────────────────────────────────────────────────────
+function AnimatedSection({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setVisible(true); },
+      { threshold: 0.1 }
+    );
+    if (ref.current) observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <motion.div
+      ref={ref}
+      className={className}
+      initial={{ opacity: 0, y: 20 }}
+      animate={visible ? { opacity: 1, y: 0 } : {}}
+      transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+// ─── Entrance Screen ──────────────────────────────────────────────────────────
+function EntranceScreen({ onEnter }: { onEnter: () => void }) {
+  const [opening, setOpening] = useState(false);
+
+  const handleClick = () => {
+    if (opening) return;
+    setOpening(true);
+    setTimeout(() => onEnter(), 1100);
+  };
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden"
+      style={{
+        backgroundImage: "url('/Opening Gate Background.png')",
+        backgroundSize: "cover",
+        backgroundPosition: "center"
+      }}
+      animate={opening ? { opacity: 0 } : { opacity: 1 }}
+      transition={{ duration: 0.5, delay: opening ? 0.8 : 0 }}
+    >
+      {/* Left envelope panel */}
+      <motion.div
+        className="absolute inset-y-0 left-0 w-1/2 origin-left"
+        style={{
+          background: "linear-gradient(135deg, rgba(78, 13, 30, 0.95) 0%, rgba(47, 3, 18, 0.98) 100%)",
+          borderRight: "1px solid rgba(196, 157, 96, 0.3)"
+        }}
+        animate={opening ? { x: "-100%" } : { x: 0 }}
+        transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+      >
+        <div className="absolute inset-0" style={{
+          background: "linear-gradient(135deg, rgba(255,255,255,0.05) 0%, transparent 50%)"
+        }} />
+      </motion.div>
+
+      {/* Right envelope panel */}
+      <motion.div
+        className="absolute inset-y-0 right-0 w-1/2 origin-right"
+        style={{
+          background: "linear-gradient(225deg, rgba(78, 13, 30, 0.95) 0%, rgba(47, 3, 18, 0.98) 100%)",
+          borderLeft: "1px solid rgba(255, 255, 255, 0.15)"
+        }}
+        animate={opening ? { x: "100%" } : { x: 0 }}
+        transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+      >
+        <div className="absolute inset-0" style={{
+          background: "linear-gradient(225deg, rgba(255,255,255,0.05) 0%, transparent 50%)"
+        }} />
+      </motion.div>
+
+      {/* Center seam */}
+      <motion.div
+        className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2"
+        style={{ background: "rgba(196, 157, 96, 0.25)" }}
+        animate={opening ? { opacity: 0 } : { opacity: 1 }}
+      />
+
+      {/* Wax stamp */}
+      <motion.button
+        onClick={handleClick}
+        className="relative z-10 flex items-center justify-center rounded-full focus:outline-none focus:ring-2 focus:ring-amber-400/50"
+        style={{ width: 110, height: 110 }}
+        animate={opening
+          ? { scale: 0.8, opacity: 0 }
+          : { scale: [1, 1.04, 1] }
+        }
+        transition={opening
+          ? { duration: 0.3 }
+          : { duration: 2.2, repeat: Infinity, ease: "easeInOut" }
+        }
+        aria-label="Buka jemputan"
+      >
+        {/* Wax circle */}
+        <div className="absolute inset-0 rounded-full" style={{
+          background: "radial-gradient(circle at 35% 35%, #842944, #3a0311)",
+          boxShadow: "0 6px 24px rgba(58,3,17,0.6), inset 0 2px 4px rgba(255,255,255,0.15)",
+          border: "2px solid rgba(196, 157, 96, 0.4)"
+        }} />
+        {/* Stamp inner */}
+        <div className="relative z-10 text-center">
+          <div className="font-greatvibes text-amber-100/90 text-2xl tracking-wider leading-none mb-1">
+            N
+          </div>
+          <div className="font-montserrat text-amber-200/60 text-[9px] tracking-widest uppercase">
+            &amp;
+          </div>
+          <div className="font-greatvibes text-amber-100/90 text-2xl tracking-wider leading-none mt-1">
+            S
+          </div>
+        </div>
+      </motion.button>
+
+      {/* Hint text */}
+      <motion.p
+        className="font-montserrat absolute bottom-12 text-center text-xs tracking-[0.25em] uppercase"
+        style={{ color: "#d4b896" }}
+        animate={{ opacity: [0.5, 1, 0.5] }}
+        transition={{ duration: 2.2, repeat: Infinity }}
+      >
+        Buka Jemputan
+      </motion.p>
+    </motion.div>
+  );
+}
+
+// ─── Cover Page ───────────────────────────────────────────────────────────────
+function CoverPage() {
+  const sparkles = Array.from({ length: 8 }, (_, i) => ({
+    x: [15, 80, 25, 70, 10, 90, 40, 60][i],
+    y: [20, 15, 75, 80, 50, 45, 10, 85][i],
+    delay: i * 0.4,
+  }));
+
+  return (
+    <div className="cover-page-shell relative flex h-full min-h-screen flex-col items-center justify-start overflow-hidden">
+      {/* Background Image */}
+      <div className="absolute inset-0" style={{
+        backgroundImage: "url('/Main Page.png')",
+        backgroundSize: "cover",
+        backgroundPosition: "center"
+      }} />
+
+      {/* Sparkles */}
+      {sparkles.map((s, i) => <Sparkle key={i} {...s} />)}
+    </div>
+  );
+}
+
+// ─── Mukadimah Section ────────────────────────────────────────────────────────
+function MukadimahSection() {
+  return (
+    <AnimatedSection className="invitation-section invitation-section-intro px-6 py-12 text-center">
+      <p className="font-playfair text-2xl mb-5 leading-relaxed" style={{ color: "#842944", direction: "rtl" }}>
+        بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ
+      </p>
+      <OrnamentDivider />
+      <p className="section-kicker font-montserrat text-xs tracking-widest uppercase font-semibold mt-6 mb-3" style={{ color: "#4a1228" }}>
+        Assalamualaikum dan Salam Sejahtera
+      </p>
+      <p className="guest-line font-playfair text-xs tracking-wider italic mb-6" style={{ color: "#8d5267" }}>
+        Dato&apos; / Datin / Tuan / Puan / Encik / Cik
+      </p>
+      <p className="body-copy font-montserrat text-[13px] leading-7 mb-6" style={{ color: "#3d0e20" }}>
+        Dengan segala hormatnya dan penuh kesyukuran ke hadrat Ilahi, kami mempersilakan kehadiran Tuan/Puan ke majlis perkahwinan anakanda kami:
+      </p>
+      <p className="names-script font-greatvibes text-4xl mb-1" style={{ color: "#4a1228" }}>Fatin Nashuha</p>
+      <p className="font-montserrat text-[11px] tracking-widest uppercase mb-3" style={{ color: "#8d5267" }}>Binti Jeffri</p>
+      <p className="font-montserrat text-lg mb-3" style={{ color: "#b8894a" }}>&amp;</p>
+      <p className="names-script font-greatvibes text-4xl mb-1" style={{ color: "#4a1228" }}>Mohamad Shafiq</p>
+      <p className="font-montserrat text-[11px] tracking-widest uppercase mb-8" style={{ color: "#8d5267" }}>Bin Mohd Shakri</p>
+      <p className="font-montserrat text-[10px] tracking-widest uppercase mb-1" style={{ color: "#b8894a" }}>— Daripada —</p>
+      <p className="parent-names font-playfair text-sm leading-7" style={{ color: "#3d0e20" }}>
+        <strong>Jeffri Bin Mat Jaafar</strong><br />
+        &amp; <strong>Sarina Binti Mat Din @ Samsudin</strong>
+      </p>
+      <div className="mt-8">
+        <OrnamentDivider />
+      </div>
+    </AnimatedSection>
+  );
+}
+
+// ─── Details Section ──────────────────────────────────────────────────────────
+function DetailsSection() {
+  const links = mapLinks();
+  return (
+    <AnimatedSection className="invitation-section px-6 py-9 text-center">
+      <p className="section-kicker font-montserrat text-xs tracking-widest uppercase font-semibold mb-6" style={{ color: "#4a1228" }}>
+        Butiran Majlis
+      </p>
+
+      <div className="detail-stack space-y-6">
+        <div>
+          <p className="detail-label font-montserrat text-[10px] tracking-widest uppercase mb-2" style={{ color: "#b8894a" }}>Lokasi</p>
+          <p className="detail-value font-playfair text-lg font-bold mb-1" style={{ color: "#4a1228" }}>{eventDetails.venueName}</p>
+          <p className="detail-address font-montserrat text-xs leading-6" style={{ color: "#3d0e20" }}>
+            {eventDetails.venueAddress}
+          </p>
+        </div>
+
+        <div className="h-px w-32 mx-auto bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+
+        <div>
+          <p className="detail-label font-montserrat text-[10px] tracking-widest uppercase mb-2" style={{ color: "#b8894a" }}>Tarikh</p>
+          <p className="detail-value font-playfair text-base font-semibold" style={{ color: "#4a1228" }}>{eventDetails.dateLabel}</p>
+        </div>
+
+        <div className="h-px w-32 mx-auto bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+
+        <div>
+          <p className="detail-label font-montserrat text-[10px] tracking-widest uppercase mb-2" style={{ color: "#b8894a" }}>Masa</p>
+          <p className="detail-value font-playfair text-base font-semibold" style={{ color: "#4a1228" }}>{eventDetails.timeLabel}</p>
+        </div>
+      </div>
+
+      <div className="flex justify-center gap-3 mt-8">
+        <a
+          href={links.google}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="action-link inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs tracking-wide transition hover:bg-amber-50 active:scale-95 shadow-sm font-semibold"
+          style={{ borderColor: "rgba(196,157,96,0.3)", color: "#4a1228", background: "rgba(255,255,255,0.7)" }}
+        >
+          <MapPin className="w-3.5 h-3.5" />
+          Google Maps
+        </a>
+        <a
+          href={links.waze}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="action-link inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs tracking-wide transition hover:bg-amber-50 active:scale-95 shadow-sm font-semibold"
+          style={{ borderColor: "rgba(196,157,96,0.3)", color: "#4a1228", background: "rgba(255,255,255,0.7)" }}
+        >
+          <Navigation className="w-3.5 h-3.5" />
+          Waze
+        </a>
+      </div>
+    </AnimatedSection>
+  );
+}
+
+// ─── Countdown Section ────────────────────────────────────────────────────────
+function CountdownSection() {
+  const [time, setTime] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+
+  useEffect(() => {
+    const update = () => {
+      const TARGET = new Date(eventDateTime).getTime();
+      const diff = TARGET - Date.now();
+      if (diff <= 0) { setTime({ days: 0, hours: 0, minutes: 0, seconds: 0 }); return; }
+      setTime({
+        days: Math.floor(diff / 86400000),
+        hours: Math.floor((diff % 86400000) / 3600000),
+        minutes: Math.floor((diff % 3600000) / 60000),
+        seconds: Math.floor((diff % 60000) / 1000),
+      });
+    };
+    update();
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const units = [
+    { label: "Hari", value: time.days },
+    { label: "Jam", value: time.hours },
+    { label: "Minit", value: time.minutes },
+    { label: "Saat", value: time.seconds },
+  ];
+
+  return (
+    <AnimatedSection className="invitation-section px-6 py-10 text-center">
+      <p className="section-kicker font-montserrat text-xs tracking-widest uppercase font-semibold mb-2" style={{ color: "#4a1228" }}>
+        Menghitung Hari
+      </p>
+      <p className="font-greatvibes text-3xl mb-6" style={{ color: "#8d5267" }}>
+        Menanti Hari Bahagia
+      </p>
+
+      <div className="countdown-grid grid grid-cols-4 gap-2.5">
+        {units.map(({ label, value }) => (
+          <div
+            key={label}
+            className="countdown-card rounded-xl py-3 px-1 flex flex-col items-center shadow-sm"
+            style={{ background: "rgba(255, 255, 255, 0.75)", border: "1px solid rgba(196,157,96,0.15)" }}
+          >
+            <span className="countdown-number font-playfair text-2xl font-bold leading-none" style={{ color: "#4a1228" }}>
+              {formatTwoDigits(value)}
+            </span>
+            <span className="countdown-label font-montserrat text-[9px] tracking-widest uppercase mt-2 font-semibold" style={{ color: "#8d5267" }}>
+              {label}
+            </span>
+          </div>
+        ))}
+      </div>
+    </AnimatedSection>
+  );
+}
+
+// ─── Atur Cara Section ────────────────────────────────────────────────────────
+function AturCaraSection() {
+  const events = [
+    { time: "12.00 PM", label: "Ketibaan Para Jemputan" },
+    { time: "12.30 PM", label: "Perarakan Pengantin & Makan Beradab" },
+    { time: "04.00 PM", label: "Majlis Bersurai" },
+  ];
+
+  return (
+    <AnimatedSection className="invitation-section px-6 py-10">
+      <p className="section-kicker font-montserrat text-xs tracking-widest uppercase font-semibold mb-6 text-center" style={{ color: "#4a1228" }}>
+        Atur Cara
+      </p>
+      <div className="timeline-list space-y-5 relative max-w-xs mx-auto">
+        <div className="timeline-line absolute left-[4.5rem] top-2 bottom-2 w-px" style={{ background: "linear-gradient(to bottom, transparent, rgba(196,157,96,0.3), transparent)" }} />
+        {events.map(({ time, label }) => (
+          <div key={time} className="flex items-center gap-4">
+            <p className="timeline-time font-montserrat text-[10px] font-semibold w-16 text-right shrink-0" style={{ color: "#b8894a" }}>{time}</p>
+            <div className="w-2 h-2 rounded-full shrink-0 z-10" style={{ background: "#b8894a" }} />
+            <p className="timeline-text font-playfair text-xs font-semibold" style={{ color: "#3d0e20" }}>{label}</p>
+          </div>
+        ))}
+      </div>
+    </AnimatedSection>
+  );
+}
+
+// ─── Horizontal Gallery ───────────────────────────────────────────────────────
+function HorizontalImageStack() {
+  const galleryImages = [
+    { src: "/Opening Gate Background.png", label: "Bukaan" },
+    { src: "/Main Page.png", label: "Kad Utama" },
+    { src: "/Background Second Page.png", label: "Jemputan" },
+    { src: "/Background Last page.png", label: "Penutup" },
+  ];
+  const [active, setActive] = useState(0);
+  const trackRef = useRef<HTMLDivElement>(null);
+
+  const goTo = (index: number) => {
+    setActive(Math.max(0, Math.min(galleryImages.length - 1, index)));
+  };
+
+  return (
+    <section className="w-full mt-4 flex flex-col gap-3">
+      <div className="gallery-card relative overflow-hidden rounded-xl aspect-[4/5] border border-amber-500/10 shadow-md">
+        <img
+          src={galleryImages[active].src}
+          className="w-full h-full object-cover transition-all duration-300"
+          alt={galleryImages[active].label}
+        />
+        <div className="absolute bottom-3 left-3 bg-black/40 backdrop-blur-sm text-white px-2 py-0.5 rounded text-[10px] font-montserrat uppercase tracking-wider font-semibold">
+          {galleryImages[active].label}
+        </div>
+      </div>
+      <div className="flex justify-between items-center px-1 text-xs">
+        <span className="font-montserrat text-gray-500 font-semibold">{active + 1} / {galleryImages.length}</span>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={active === 0}
+            onClick={() => goTo(active - 1)}
+            className="w-8 h-8 rounded-full border flex items-center justify-center bg-white shadow-sm disabled:opacity-40 transition"
+          >
+            <ChevronLeft className="w-4 h-4 text-gray-700" />
+          </button>
+          <button
+            type="button"
+            disabled={active === galleryImages.length - 1}
+            onClick={() => goTo(active + 1)}
+            className="w-8 h-8 rounded-full border flex items-center justify-center bg-white shadow-sm disabled:opacity-40 transition"
+          >
+            <ChevronRight className="w-4 h-4 text-gray-700" />
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── Doa Section ─────────────────────────────────────────────────────────────
+function DoaSection() {
+  return (
+    <AnimatedSection className="invitation-section px-6 py-10 text-center">
+      <p className="section-kicker font-montserrat text-xs tracking-widest uppercase font-semibold mb-4" style={{ color: "#4a1228" }}>
+        Doa &amp; Harapan
+      </p>
+      <OrnamentDivider />
+      <p className="doa-copy font-playfair text-xs leading-7 mt-6 italic" style={{ color: "#3d0e20" }}>
+        &quot;Ya Allah, berkatilah perkahwinan ini. Jadikanlah ia perkahwinan yang penuh kasih sayang, kebahagiaan dan keberkatan. Semoga pasangan ini dikurniakan keluarga yang sakinah, mawaddah wa rahmah.&quot;
+      </p>
+      <div className="mt-6">
+        <OrnamentDivider />
+      </div>
+      <p className="guest-line font-montserrat text-[11px] mt-4 font-semibold" style={{ color: "#8d5267" }}>
+        Kehadiran Tuan/Puan amat dihargai. Terima Kasih.
+      </p>
+    </AnimatedSection>
+  );
+}
+
+// ─── Sheet Content Components ─────────────────────────────────────────────────
+function SheetContent({
+  active,
+  musicState,
+  onMusicPlay,
+  onMusicPause,
+  rsvpForm,
+  rsvpStatus,
+  isSubmitting,
+  updateRsvpForm,
+  submitRsvp,
+  wishes,
+}: {
+  active: DockPanel;
+  musicState: YouTubePlaybackState;
+  onMusicPlay: () => void;
+  onMusicPause: () => void;
+  rsvpForm: RsvpFormState;
+  rsvpStatus: string;
+  isSubmitting: boolean;
+  updateRsvpForm: (patch: Partial<RsvpFormState>) => void;
+  submitRsvp: (event: React.FormEvent<HTMLFormElement>) => void;
+  wishes: RsvpSubmission[];
+}) {
+  if (active === "time") {
+    const calendar = calendarDetails();
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-3 p-3 rounded-xl border border-amber-500/10 bg-[#842944]/5">
+          <Calendar className="w-6 h-6 text-[#842944]" />
+          <div>
+            <strong className="block text-sm text-[#4a1228] font-bold">{eventDetails.dateLabel}</strong>
+            <span className="text-xs text-gray-500">{eventDetails.timeLabel}</span>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={downloadCalendar}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border text-xs font-semibold bg-white hover:bg-gray-50 active:scale-95 transition"
+            style={{ color: "#4a1228", borderColor: "rgba(196,157,96,0.25)" }}
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            Muat Turun .ics
+          </button>
+          <a
+            href={calendar.google}
+            target="_blank"
+            rel="noreferrer"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border text-xs font-semibold bg-[#842944] text-[#fff4d6] hover:brightness-110 active:scale-95 transition"
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            Google Calendar
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  if (active === "location") {
+    const links = mapLinks();
+    return (
+      <div className="space-y-4">
+        <div className="p-3 rounded-xl border border-amber-500/10 bg-[#842944]/5">
+          <strong className="block text-sm text-[#4a1228] font-bold">{eventDetails.venueName}</strong>
+          <p className="text-xs text-gray-500 mt-1 leading-5">{eventDetails.venueAddress}</p>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <a
+            href={links.google}
+            target="_blank"
+            rel="noreferrer"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border text-xs font-semibold bg-white hover:bg-gray-50 active:scale-95 transition"
+            style={{ color: "#4a1228", borderColor: "rgba(196,157,96,0.25)" }}
+          >
+            <MapPin className="w-3.5 h-3.5" />
+            Google Maps
+          </a>
+          <a
+            href={links.waze}
+            target="_blank"
+            rel="noreferrer"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border text-xs font-semibold bg-[#842944] text-[#fff4d6] hover:brightness-110 active:scale-95 transition"
+          >
+            <Navigation className="w-3.5 h-3.5" />
+            Waze
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  if (active === "rsvp") {
+    return (
+      <div className="space-y-4 overflow-y-auto max-h-[60vh] pr-1">
+        <form onSubmit={submitRsvp} className="grid grid-cols-2 gap-3">
+          <div className="col-span-2">
+            <label className="block text-[11px] font-bold uppercase tracking-wider mb-1 text-gray-500">Nama</label>
+            <input
+              required
+              name="name"
+              value={rsvpForm.name}
+              maxLength={80}
+              placeholder="Nama anda..."
+              className="w-full px-3 py-2 rounded-xl border text-sm focus:outline-none focus:ring-1 focus:ring-amber-500 bg-white"
+              onChange={(event) => updateRsvpForm({ name: event.target.value })}
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-wider mb-1 text-gray-500">Kehadiran</label>
+            <select
+              name="attendance"
+              value={rsvpForm.attendance}
+              className="w-full px-3 py-2 rounded-xl border text-sm focus:outline-none bg-white"
+              onChange={(event) => updateRsvpForm({ attendance: event.target.value as AttendanceStatus })}
+            >
+              {attendanceOptions.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-wider mb-1 text-gray-500">Jumlah pax</label>
+            <input
+              name="pax"
+              type="number"
+              min={1}
+              max={10}
+              value={rsvpForm.pax}
+              className="w-full px-3 py-2 rounded-xl border text-sm focus:outline-none bg-white"
+              onChange={(event) => updateRsvpForm({ pax: Math.min(10, Math.max(1, Number(event.target.value) || 1)) })}
+            />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-[11px] font-bold uppercase tracking-wider mb-1 text-gray-500">No telefon</label>
+            <input
+              name="phone"
+              type="tel"
+              value={rsvpForm.phone}
+              maxLength={30}
+              placeholder="Contoh: 0191234567"
+              className="w-full px-3 py-2 rounded-xl border text-sm focus:outline-none bg-white"
+              onChange={(event) => updateRsvpForm({ phone: event.target.value })}
+            />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-[11px] font-bold uppercase tracking-wider mb-1 text-gray-500">Ucapan</label>
+            <textarea
+              name="wish"
+              value={rsvpForm.wish}
+              maxLength={240}
+              rows={3}
+              placeholder="Tulis ucapan ringkas..."
+              className="w-full px-3 py-2 rounded-xl border text-sm focus:outline-none bg-white"
+              onChange={(event) => updateRsvpForm({ wish: event.target.value })}
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="col-span-2 py-2.5 rounded-xl text-xs font-semibold bg-[#842944] text-[#fff4d6] disabled:opacity-50 transition active:scale-95"
+          >
+            {isSubmitting ? "Menyimpan..." : "Hantar RSVP"}
+          </button>
+        </form>
+        {rsvpStatus && (
+          <p className="p-2 text-xs rounded-xl border border-green-500/20 bg-green-50 text-green-700 text-center" role="status">
+            {rsvpStatus}
+          </p>
+        )}
+
+        {/* Wishes List */}
+        <div className="pt-4 border-t border-gray-100">
+          <h4 className="text-[11px] font-bold uppercase tracking-wider mb-2 text-gray-400">Ucapan Terbaru</h4>
+          <div className="space-y-2.5">
+            {wishes.slice(0, 4).map((w, idx) => (
+              <div key={idx} className="p-2.5 rounded-xl border border-gray-100 bg-gray-50/50 text-xs">
+                <p className="italic text-gray-700">&quot;{w.wish || "Semoga majlis berjalan lancar."}&quot;</p>
+                <strong className="block text-right text-gray-600 mt-1.5">— {w.name}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (active === "gift") {
+    const family = malaysiaPhoneLinks(contacts[0].phone);
+    return (
+      <div className="space-y-4 text-center">
+        <div className="flex flex-col items-center p-4 rounded-xl border border-amber-500/10 bg-[#842944]/5">
+          <Gift className="w-8 h-8 text-[#842944] mb-2" />
+          <strong className="block text-base text-[#4a1228] font-bold">{giftDetails.title}</strong>
+          <span className="text-xs text-gray-500 mt-1">{giftDetails.recipient}</span>
+        </div>
+        <div className="p-3 rounded-xl border bg-white shadow-sm text-xs">
+          <span className="block text-gray-400 font-semibold mb-1">Bank / DuitNow</span>
+          <strong className="text-sm text-[#4a1228] font-bold">{giftDetails.bank}</strong>
+          <p className="text-gray-500 mt-2 leading-relaxed">{giftDetails.note}</p>
+        </div>
+        <a
+          href={family.whatsapp}
+          target="_blank"
+          rel="noreferrer"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold bg-[#842944] text-[#fff4d6] hover:brightness-110 active:scale-95 transition"
+        >
+          <MessageSquare className="w-3.5 h-3.5" />
+          Hubungi Keluarga (WhatsApp)
+        </a>
+      </div>
+    );
+  }
+
+  if (active === "contact") {
+    return (
+      <div className="space-y-2.5">
+        {contacts.map((c) => {
+          const links = malaysiaPhoneLinks(c.phone);
+          return (
+            <div key={c.name} className="flex justify-between items-center p-3 rounded-xl border border-gray-100 bg-white shadow-sm">
+              <div>
+                <strong className="block text-sm text-[#4a1228] font-bold">{c.name}</strong>
+                <span className="text-xs text-gray-400 font-semibold">{c.relation} — {c.phone}</span>
+              </div>
+              <div className="flex gap-2">
+                <a
+                  href={links.tel}
+                  className="w-8 h-8 rounded-full border flex items-center justify-center bg-white hover:bg-gray-50 transition active:scale-90"
+                  aria-label={`Panggil ${c.name}`}
+                >
+                  <Phone className="w-3.5 h-3.5 text-[#842944]" />
+                </a>
+                <a
+                  href={links.whatsapp}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="w-8 h-8 rounded-full border flex items-center justify-center bg-white hover:bg-gray-50 transition active:scale-90"
+                  aria-label={`WhatsApp ${c.name}`}
+                >
+                  <MessageSquare className="w-3.5 h-3.5 text-[#842944]" />
+                </a>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  const musicLabels: Record<YouTubePlaybackState, string> = {
+    invalid: "Pautan YouTube tidak sah.",
+    loading: "Memuatkan pemain...",
+    ready: "Pemain sedia.",
+    playing: "Lagu sedang dimainkan.",
+    paused: "Lagu dijeda.",
+    blocked: "Autoplay disekat. Tekan Play untuk memulakan lagu.",
+    ended: "Lagu telah tamat.",
+    error: "Pemain YouTube tidak dapat dimuatkan.",
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-4 text-center">
+      <Music className="w-8 h-8 text-[#842944] animate-bounce" />
+      <p className="text-xs text-gray-500 leading-relaxed font-semibold">{musicLabels[musicState]}</p>
+      {musicState === "playing" ? (
+        <button
+          type="button"
+          onClick={onMusicPause}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-[#842944] text-[#fff4d6] active:scale-95 transition"
+        >
+          <Pause className="w-3.5 h-3.5" /> Pause
+        </button>
+      ) : (
+        <button
+          type="button"
+          disabled={musicState === "invalid" || musicState === "loading" || musicState === "error"}
+          onClick={onMusicPlay}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-[#842944] text-[#fff4d6] disabled:opacity-50 active:scale-95 transition"
+        >
+          <Play className="w-3.5 h-3.5" /> Play
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── Main App Component ───────────────────────────────────────────────────────
+export default function App() {
+  const [hasEntered, setHasEntered] = useState(false);
+  const [active, setActive] = useState<DockPanel | null>(null);
+  const [musicState, setMusicState] = useState<YouTubePlaybackState>("loading");
+  const [wishes, setWishes] = useState<RsvpSubmission[]>(seedWishes);
+  const [rsvpForm, setRsvpForm] = useState<RsvpFormState>(initialForm);
+  const [rsvpStatus, setRsvpStatus] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const playerRef = useRef<YouTubeControllerHandle>(null);
+  const validMusic = true;
+
+  const closeSheet = () => setActive(null);
+  
+  const openSheet = (panel: DockPanel) => {
+    setActive((curr) => (curr === panel ? null : panel));
+  };
+
+  const openInvitation = () => {
+    setHasEntered(true);
+    // Play music after user interaction to bypass autoplay blocks
+    setTimeout(() => {
+      playerRef.current?.play();
+    }, 300);
+  };
+
+  const updateRsvpForm = (patch: Partial<RsvpFormState>) => {
+    setRsvpForm((curr) => ({ ...curr, ...patch }));
+  };
+
+  const submitRsvp = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setRsvpStatus("");
+    setIsSubmitting(true);
+    try {
+      const submission = createRsvpSubmission(rsvpForm);
+      setWishes((curr) => {
+        const next = [submission, ...curr].slice(0, 20);
+        writeStoredWishes(next);
+        return next;
+      });
+      setRsvpForm(initialForm);
+      setRsvpStatus("Terima kasih. RSVP anda telah disimpan.");
+    } catch (error) {
+      setRsvpStatus(error instanceof Error ? error.message : "RSVP tidak dapat dihantar.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    setWishes(readStoredWishes());
+  }, []);
+
+  return (
+    <div className="invitation-root relative min-h-screen font-montserrat">
+      <style>{fontStyle}</style>
+
+      {/* Hidden persistent youtube player */}
+      <PersistentYouTubePlayer
+        ref={playerRef}
+        youtubeUrl={musicUrl}
+        startAt={musicStartAt}
+        endAt=""
+        onStateChange={setMusicState}
+      />
+
+      {/* Entrance screen */}
+      <AnimatePresence>
+        {!hasEntered && <EntranceScreen onEnter={openInvitation} />}
+      </AnimatePresence>
+
+      {/* Main card wrapper */}
+      <AnimatePresence>
+        {hasEntered && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.6 }}
+            className="relative pb-28 min-h-screen"
+          >
+            {/* Device-like centered wrapper */}
+            <div className="invitation-frame w-full max-w-lg mx-auto sm:my-8 sm:rounded-3xl overflow-hidden shadow-2xl border border-amber-500/15" style={{ minHeight: "100dvh" }}>
+              {/* Cover Card */}
+              <div className="min-h-screen flex flex-col relative">
+                <CoverPage />
+              </div>
+
+              {/* Inner details sections */}
+              <div className="invitation-paper" style={{
+                backgroundImage: "url('/Background Second Page.png')",
+                backgroundSize: "cover",
+                backgroundRepeat: "repeat-y",
+                backgroundPosition: "top center"
+              }}>
+                <MukadimahSection />
+                <div className="mx-6 h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+                
+                <DetailsSection />
+                <div className="mx-6 h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+                
+                <CountdownSection />
+                <div className="mx-6 h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+                
+                <AturCaraSection />
+                <div className="mx-6 h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+                
+                {/* Horizontal Gallery */}
+                <div className="invitation-section px-6 py-10">
+                  <p className="section-kicker font-montserrat text-xs tracking-widest uppercase font-semibold text-center mb-2" style={{ color: "#4a1228" }}>Galeri</p>
+                  <HorizontalImageStack />
+                </div>
+                <div className="mx-6 h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+
+                <DoaSection />
+              </div>
+
+              {/* Closing Section */}
+              <div
+                className="relative py-16 px-6 text-center flex flex-col justify-end"
+                style={{
+                  backgroundImage: "url('/Background Last page.png')",
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                  minHeight: "85vh"
+                }}
+              >
+                <div className="absolute inset-0 bg-white/10 z-0 pointer-events-none" />
+                <div className="closing-card relative z-10 space-y-5 bg-white/70 backdrop-blur-md border border-amber-500/15 p-6 rounded-2xl shadow-lg max-w-sm mx-auto mb-10">
+                  <p className="section-kicker text-xs uppercase tracking-widest font-semibold" style={{ color: "#8d5267" }}>Kehadiran anda amat bermakna</p>
+                  <h2 className="closing-title font-greatvibes text-4xl" style={{ color: "#4a1228" }}>RSVP &amp; Hadiah</h2>
+                  <p className="closing-copy text-xs leading-5 text-gray-600">Sahkan kehadiran dan tinggalkan ucapan anda untuk pihak pengantin.</p>
+                  <div className="flex gap-2 justify-center">
+                    <button
+                      onClick={() => openSheet("rsvp")}
+                      className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold bg-[#842944] text-[#fff4d6] hover:brightness-115 active:scale-95 transition shadow"
+                    >
+                      <Mail className="w-3.5 h-3.5" /> RSVP
+                    </button>
+                    <button
+                      onClick={() => openSheet("gift")}
+                      className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold bg-white border text-[#842944] hover:bg-gray-50 active:scale-95 transition shadow-sm"
+                      style={{ borderColor: "rgba(196,157,96,0.3)" }}
+                    >
+                      <Gift className="w-3.5 h-3.5" /> Gift
+                    </button>
+                  </div>
+                </div>
+
+                <div className="relative z-10 pt-10 pb-6 text-center border-t border-amber-500/10">
+                  <p className="font-greatvibes text-3xl" style={{ color: "#4a1228" }}>Nashuha &amp; Shafiq</p>
+                  <p className="font-montserrat text-[10px] tracking-[0.2em] uppercase font-semibold text-gray-500 mt-2">22 Ogos 2026</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom sheets / modals */}
+            <AnimatePresence>
+              {active && (
+                <>
+                  {/* Backdrop */}
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    onClick={closeSheet}
+                    className="fixed inset-0 z-30 bg-black/30 backdrop-blur-sm"
+                  />
+                  {/* Modal sheet */}
+                  <motion.div
+                    initial={{ y: "100%" }}
+                    animate={{ y: 0 }}
+                    exit={{ y: "100%" }}
+                    transition={{ type: "spring", damping: 30, stiffness: 350 }}
+                    className="sheet-panel fixed inset-x-0 bottom-16 z-40 mx-auto max-w-lg rounded-t-3xl p-6 shadow-2xl bg-white/95 backdrop-blur-xl border-t border-amber-500/15"
+                  >
+                    <div className="w-12 h-1 bg-amber-500/20 rounded-full mx-auto mb-4" />
+                    <div className="flex justify-between items-center mb-5">
+                      <div>
+                        <small className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Jemputan</small>
+                        <h2 className="text-xl font-bold font-playfair text-[#4a1228]">
+                          {active === "time" && "Tarikh & Masa"}
+                          {active === "location" && "Lokasi Majlis"}
+                          {active === "rsvp" && "Sahkan RSVP"}
+                          {active === "gift" && "Hadiah Digital"}
+                          {active === "contact" && "Hubungi Kami"}
+                          {active === "music" && "Lagu Pilihan"}
+                        </h2>
+                      </div>
+                      <button
+                        onClick={closeSheet}
+                        className="w-8 h-8 rounded-full border border-gray-100 flex items-center justify-center bg-gray-50 hover:bg-gray-100 transition"
+                      >
+                        <X className="w-4 h-4 text-gray-500" />
+                      </button>
+                    </div>
+
+                    <SheetContent
+                      active={active}
+                      musicState={musicState}
+                      onMusicPlay={() => playerRef.current?.play()}
+                      onMusicPause={() => playerRef.current?.pause()}
+                      rsvpForm={rsvpForm}
+                      rsvpStatus={rsvpStatus}
+                      isSubmitting={isSubmitting}
+                      updateRsvpForm={updateRsvpForm}
+                      submitRsvp={submitRsvp}
+                      wishes={wishes}
+                    />
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+
+            {/* Separate floating circular Music dock button */}
+            {validMusic && (
+              <button
+                type="button"
+                onClick={() => openSheet("music")}
+                className={`music-dock fixed right-4 bottom-20 z-40 w-12 h-12 rounded-full flex items-center justify-center bg-[#842944] text-[#fff4d6] shadow-lg border border-amber-500/20 transition-all hover:scale-105 active:scale-95 ${
+                  active === "music" ? "ring-2 ring-[#fff4d6]" : ""
+                }`}
+                style={{
+                  right: "max(16px, calc((100vw - 512px) / 2 + 16px))"
+                }}
+              >
+                {musicState === "playing" ? (
+                  <Music className="w-5 h-5 text-[#fff4d6] animate-pulse" />
+                ) : (
+                  <Music className="w-5 h-5 text-[#fff4d6] opacity-60" />
+                )}
+              </button>
+            )}
+
+            {/* Fixed bottom navigation dock (Apple-like) */}
+            <nav
+              className="invitation-dock fixed bottom-3 inset-x-4 z-40 mx-auto max-w-md grid grid-cols-5 gap-1.5 p-2 rounded-full shadow-2xl backdrop-blur-xl border"
+              style={{
+                background: "rgba(132, 41, 68, 0.95)",
+                borderColor: "rgba(255, 244, 217, 0.2)",
+                color: "#fff4d6"
+              }}
+            >
+              {[
+                { panel: "time", icon: Clock, label: "Masa" },
+                { panel: "location", icon: MapPin, label: "Lokasi" },
+                { panel: "rsvp", icon: Mail, label: "RSVP" },
+                { panel: "gift", icon: Gift, label: "Gift" },
+                { panel: "contact", icon: Phone, label: "Hubungi" }
+              ].map(({ panel, icon: Icon, label }) => (
+                <button
+                  key={panel}
+                  onClick={() => openSheet(panel as DockPanel)}
+                  className={`flex flex-col items-center justify-center py-1.5 rounded-full transition-all active:scale-90 ${
+                    active === panel ? "bg-amber-500/25 border border-amber-500/25 text-[#fff4d6] font-semibold" : "text-amber-100/70 hover:text-white"
+                  }`}
+                >
+                  <Icon className="w-4 h-4 mb-0.5" />
+                  <span className="text-[9px] tracking-wide uppercase font-semibold">{label}</span>
+                </button>
+              ))}
+            </nav>
+
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
