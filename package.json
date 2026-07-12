@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "dev": "vite"
+    "dev": "concurrently -k -n api,web \"node server/index.mjs\" \"vite --host 127.0.0.1\"",
+    "dev:api": "node server/index.mjs",
+    "dev:web": "vite",
+    "start": "node server/index.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -45,6 +48,7 @@
     "cmdk": "1.1.1",
     "date-fns": "3.6.0",
     "embla-carousel-react": "8.6.0",
+    "express": "5.1.0",
     "input-otp": "1.4.2",
     "lucide-react": "0.487.0",
     "motion": "12.23.24",
@@ -62,11 +66,13 @@
     "sonner": "2.0.3",
     "tailwind-merge": "3.2.0",
     "tw-animate-css": "1.3.8",
-    "vaul": "1.1.2"
+    "vaul": "1.1.2",
+    "xlsx": "0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.1.12",
     "@vitejs/plugin-react": "4.7.0",
+    "concurrently": "9.2.1",
     "tailwindcss": "4.1.12",
     "vite": "6.3.5"
   },

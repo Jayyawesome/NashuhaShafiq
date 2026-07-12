@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import {
   MapPin,
   Phone,
@@ -62,6 +62,7 @@ const fontStyle = `
 type DockPanel = "time" | "location" | "rsvp" | "gift" | "contact" | "music";
 type CountdownParts = { days: number; hours: number; minutes: number; seconds: number };
 type RsvpFormState = { name: string; attendance: AttendanceStatus; pax: number; phone: string; wish: string };
+type RsvpApiResponse = { submissions: RsvpSubmission[]; workbook: string };
 
 const initialForm: RsvpFormState = {
   name: "",
@@ -71,33 +72,39 @@ const initialForm: RsvpFormState = {
   wish: "",
 };
 
-const rsvpStorageKey = "nashuha-shafiq-rsvp-submissions";
-
-function readStoredWishes() {
-  try {
-    const stored = window.localStorage.getItem(rsvpStorageKey);
-    if (!stored) return seedWishes;
-    const parsed = JSON.parse(stored);
-    return Array.isArray(parsed) ? (parsed as RsvpSubmission[]) : seedWishes;
-  } catch {
-    return seedWishes;
+async function parseRsvpResponse(response: Response): Promise<RsvpApiResponse> {
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = typeof body.error === "string" ? body.error : "RSVP tidak dapat dihantar.";
+    throw new Error(message);
   }
+  if (!Array.isArray(body.submissions)) {
+    throw new Error("Senarai RSVP tidak dapat dibaca.");
+  }
+  return body as RsvpApiResponse;
 }
 
-function writeStoredWishes(submissions: RsvpSubmission[]) {
-  window.localStorage.setItem(rsvpStorageKey, JSON.stringify(submissions));
+async function fetchRsvpSubmissions() {
+  const response = await fetch("/api/rsvp", { headers: { Accept: "application/json" } });
+  return parseRsvpResponse(response);
 }
 
-function createRsvpSubmission(form: RsvpFormState): RsvpSubmission {
-  return {
-    timestamp: new Date().toISOString(),
-    name: form.name.trim(),
-    attendance: form.attendance,
-    pax: form.pax,
-    phone: form.phone.trim(),
-    wish: form.wish.trim(),
-    source: "Browser",
-  };
+async function postRsvpSubmission(form: RsvpFormState) {
+  const response = await fetch("/api/rsvp", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name: form.name,
+      attendance: form.attendance,
+      pax: form.pax,
+      phone: form.phone,
+      wish: form.wish,
+    }),
+  });
+  return parseRsvpResponse(response);
 }
 
 function malaysiaPhoneLinks(phone: string) {
@@ -228,13 +235,15 @@ function AnimatedSection({ children, className = "" }: { children: React.ReactNo
 }
 
 // ─── Entrance Screen ──────────────────────────────────────────────────────────
-function EntranceScreen({ onEnter }: { onEnter: () => void }) {
+function EntranceScreen({ onActivate, onEnter }: { onActivate: () => void; onEnter: () => void }) {
   const [opening, setOpening] = useState(false);
+  const reduceMotion = useReducedMotion();
 
   const handleClick = () => {
     if (opening) return;
+    onActivate();
     setOpening(true);
-    setTimeout(() => onEnter(), 1100);
+    setTimeout(() => onEnter(), reduceMotion ? 220 : 1100);
   };
 
   return (
@@ -246,9 +255,8 @@ function EntranceScreen({ onEnter }: { onEnter: () => void }) {
         backgroundPosition: "center"
       }}
       animate={opening ? { opacity: 0 } : { opacity: 1 }}
-      transition={{ duration: 0.5, delay: opening ? 0.8 : 0 }}
+      transition={{ duration: reduceMotion ? 0.15 : 0.5, delay: opening && !reduceMotion ? 0.8 : 0 }}
     >
-      {/* Left envelope panel */}
       <motion.div
         className="absolute inset-y-0 left-0 w-1/2 origin-left"
         style={{
@@ -256,14 +264,13 @@ function EntranceScreen({ onEnter }: { onEnter: () => void }) {
           borderRight: "1px solid rgba(196, 157, 96, 0.3)"
         }}
         animate={opening ? { x: "-100%" } : { x: 0 }}
-        transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: reduceMotion ? 0.18 : 0.8, ease: [0.22, 1, 0.36, 1] }}
       >
         <div className="absolute inset-0" style={{
           background: "linear-gradient(135deg, rgba(255,255,255,0.05) 0%, transparent 50%)"
         }} />
       </motion.div>
 
-      {/* Right envelope panel */}
       <motion.div
         className="absolute inset-y-0 right-0 w-1/2 origin-right"
         style={{
@@ -271,64 +278,54 @@ function EntranceScreen({ onEnter }: { onEnter: () => void }) {
           borderLeft: "1px solid rgba(255, 255, 255, 0.15)"
         }}
         animate={opening ? { x: "100%" } : { x: 0 }}
-        transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: reduceMotion ? 0.18 : 0.8, ease: [0.22, 1, 0.36, 1] }}
       >
         <div className="absolute inset-0" style={{
           background: "linear-gradient(225deg, rgba(255,255,255,0.05) 0%, transparent 50%)"
         }} />
       </motion.div>
 
-      {/* Center seam */}
       <motion.div
         className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2"
         style={{ background: "rgba(196, 157, 96, 0.25)" }}
         animate={opening ? { opacity: 0 } : { opacity: 1 }}
       />
 
-      {/* Wax stamp */}
-      <motion.button
-        onClick={handleClick}
-        className="relative z-10 flex items-center justify-center rounded-full focus:outline-none focus:ring-2 focus:ring-amber-400/50"
-        style={{ width: 110, height: 110 }}
-        animate={opening
-          ? { scale: 0.8, opacity: 0 }
-          : { scale: [1, 1.04, 1] }
-        }
-        transition={opening
-          ? { duration: 0.3 }
-          : { duration: 2.2, repeat: Infinity, ease: "easeInOut" }
-        }
-        aria-label="Buka jemputan"
-      >
-        {/* Wax circle */}
-        <div className="absolute inset-0 rounded-full" style={{
-          background: "radial-gradient(circle at 35% 35%, #842944, #3a0311)",
-          boxShadow: "0 6px 24px rgba(58,3,17,0.6), inset 0 2px 4px rgba(255,255,255,0.15)",
-          border: "2px solid rgba(196, 157, 96, 0.4)"
-        }} />
-        {/* Stamp inner */}
-        <div className="relative z-10 text-center">
-          <div className="font-greatvibes text-amber-100/90 text-2xl tracking-wider leading-none mb-1">
-            N
-          </div>
-          <div className="font-montserrat text-amber-200/60 text-[9px] tracking-widest uppercase">
-            &amp;
-          </div>
-          <div className="font-greatvibes text-amber-100/90 text-2xl tracking-wider leading-none mt-1">
-            S
-          </div>
-        </div>
-      </motion.button>
+      <div className="relative z-10 flex flex-col items-center gap-5 px-8 text-center">
+        <motion.button
+          type="button"
+          onClick={handleClick}
+          disabled={opening}
+          className="opening-emblem-button relative flex items-center justify-center rounded-full focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-200/80 focus-visible:ring-offset-4 focus-visible:ring-offset-[#3a0311] disabled:cursor-default"
+          animate={opening
+            ? { scale: 0.82, opacity: 0 }
+            : reduceMotion
+              ? { scale: 1 }
+              : { scale: [1, 1.035, 1] }
+          }
+          transition={opening
+            ? { duration: reduceMotion ? 0.12 : 0.28 }
+            : { duration: 2.4, repeat: reduceMotion ? 0 : Infinity, ease: "easeInOut" }
+          }
+          aria-label="Open Nashuha and Shafiq wedding invitation"
+        >
+          <img
+            src="/shua-opening-emblem.png"
+            alt=""
+            className="opening-emblem-image h-full w-full select-none object-contain"
+            draggable={false}
+          />
+        </motion.button>
 
-      {/* Hint text */}
-      <motion.p
-        className="font-montserrat absolute bottom-12 text-center text-xs tracking-[0.25em] uppercase"
-        style={{ color: "#d4b896" }}
-        animate={{ opacity: [0.5, 1, 0.5] }}
-        transition={{ duration: 2.2, repeat: Infinity }}
-      >
-        Buka Jemputan
-      </motion.p>
+        <motion.p
+          className="font-montserrat text-center text-xs tracking-[0.22em] uppercase"
+          style={{ color: "#f3d995" }}
+          animate={opening ? { opacity: 0 } : reduceMotion ? { opacity: 1 } : { opacity: [0.62, 1, 0.62] }}
+          transition={{ duration: 2.2, repeat: opening || reduceMotion ? 0 : Infinity }}
+        >
+          Click to open the card
+        </motion.p>
+      </div>
     </motion.div>
   );
 }
@@ -391,6 +388,38 @@ function MukadimahSection() {
 }
 
 // ─── Details Section ──────────────────────────────────────────────────────────
+function WalimatulurusSection() {
+  return (
+    <AnimatedSection className="invitation-copy-section px-7 py-14 text-center">
+      <p className="parent-names font-playfair font-semibold">Jeffri Bin Mat Jaafar</p>
+      <p className="decorative-ampersand font-greatvibes">&amp;</p>
+      <p className="parent-names font-playfair font-semibold">Sarina Binti Mat Din @ Samsudin</p>
+
+      <h1 className="walimatulurus-title font-greatvibes">Walimatulurus</h1>
+
+      <p className="invitation-verse font-playfair">
+        Setepak sirih, sekacip pinang, semekar senyuman, seikhlas hati
+      </p>
+      <p className="invitation-copy-line font-playfair">
+        Dengan penuh kesyukuran ke hadrat Ilahi
+      </p>
+      <p className="invitation-copy-line font-playfair">
+        Mengundang Dato&apos; / Datin / Tuan / Puan / Encik / Cik
+      </p>
+
+      <div className="dotted-gold-divider" aria-hidden="true" />
+
+      <p className="invitation-copy-line font-playfair">
+        ke majlis perkahwinan anakanda kami
+      </p>
+
+      <p className="couple-formal-name font-playfair font-semibold">Fatin Nashuha Binti Jeffri</p>
+      <p className="decorative-ampersand font-greatvibes">&amp;</p>
+      <p className="couple-formal-name font-playfair font-semibold">Mohamad Shafiq Bin Mohd Shakri</p>
+    </AnimatedSection>
+  );
+}
+
 function DetailsSection() {
   const links = mapLinks();
   return (
@@ -535,51 +564,118 @@ function AturCaraSection() {
 
 // ─── Horizontal Gallery ───────────────────────────────────────────────────────
 function HorizontalImageStack() {
+  const reduceMotion = useReducedMotion();
   const galleryImages = [
-    { src: "/Opening Gate Background.png", label: "Bukaan" },
-    { src: "/Main Page.png", label: "Kad Utama" },
-    { src: "/Background Second Page.png", label: "Jemputan" },
-    { src: "/Background Last page.png", label: "Penutup" },
+    { src: "/Opening Gate Background.png", label: "Opening gate background" },
+    { src: "/Main Page.png", label: "Main wedding invitation artwork" },
+    { src: "/Background Second Page.png", label: "Walimatulurus invitation paper" },
+    { src: "/Background Last page.png", label: "RSVP and gift closing artwork" },
   ];
   const [active, setActive] = useState(0);
-  const trackRef = useRef<HTMLDivElement>(null);
 
-  const goTo = (index: number) => {
-    setActive(Math.max(0, Math.min(galleryImages.length - 1, index)));
+  const goTo = useCallback((index: number) => {
+    setActive((index + galleryImages.length) % galleryImages.length);
+  }, [galleryImages.length]);
+
+  const navigate = useCallback((direction: number) => {
+    setActive((current) => (current + direction + galleryImages.length) % galleryImages.length);
+  }, [galleryImages.length]);
+
+  const getRelativeIndex = (index: number) => {
+    const total = galleryImages.length;
+    let diff = index - active;
+    if (diff > total / 2) diff -= total;
+    if (diff < -total / 2) diff += total;
+    return diff;
   };
 
   return (
-    <section className="w-full mt-4 flex flex-col gap-3">
-      <div className="gallery-card relative overflow-hidden rounded-xl aspect-[4/5] border border-amber-500/10 shadow-md">
-        <img
-          src={galleryImages[active].src}
-          className="w-full h-full object-cover transition-all duration-300"
-          alt={galleryImages[active].label}
-        />
-        <div className="absolute bottom-3 left-3 bg-black/40 backdrop-blur-sm text-white px-2 py-0.5 rounded text-[10px] font-montserrat uppercase tracking-wider font-semibold">
-          {galleryImages[active].label}
-        </div>
+    <section
+      className="gallery-stack-shell mt-5"
+      aria-roledescription="carousel"
+      aria-label="Kad gambar perkahwinan"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowLeft") navigate(-1);
+        if (event.key === "ArrowRight") navigate(1);
+      }}
+    >
+      <div className="gallery-stage">
+        {galleryImages.map((image, index) => {
+          const diff = getRelativeIndex(index);
+          const hidden = Math.abs(diff) > 2;
+          const isActive = diff === 0;
+          const x = diff === 0 ? "0%" : diff === -1 ? "-42%" : diff === 1 ? "42%" : diff === -2 ? "-72%" : diff === 2 ? "72%" : diff > 0 ? "120%" : "-120%";
+          const scale = diff === 0 ? 1 : Math.abs(diff) === 1 ? 0.82 : 0.7;
+          const opacity = diff === 0 ? 1 : Math.abs(diff) === 1 ? 0.58 : Math.abs(diff) === 2 ? 0.24 : 0;
+          const rotateY = reduceMotion || diff === 0 ? 0 : diff < 0 ? 8 * Math.abs(diff) : -8 * Math.abs(diff);
+          const zIndex = 10 - Math.abs(diff);
+
+          return (
+            <motion.div
+              key={image.src}
+              className="gallery-deck-card"
+              aria-hidden={!isActive}
+              animate={{ x, scale, opacity, rotateY, zIndex }}
+              transition={reduceMotion ? { duration: 0.05 } : { type: "spring", stiffness: 260, damping: 30, mass: 0.85 }}
+              drag={isActive ? "x" : false}
+              dragConstraints={{ left: 0, right: 0 }}
+              dragElastic={0.22}
+              onDragEnd={(_, info) => {
+                if (info.offset.x < -50) navigate(1);
+                if (info.offset.x > 50) navigate(-1);
+              }}
+              style={{
+                pointerEvents: isActive ? "auto" : "none",
+                visibility: hidden ? "hidden" : "visible",
+              }}
+            >
+              <img
+                src={image.src}
+                alt={image.label}
+                draggable={false}
+                className="h-full w-full select-none object-cover"
+              />
+            </motion.div>
+          );
+        })}
       </div>
-      <div className="flex justify-between items-center px-1 text-xs">
-        <span className="font-montserrat text-gray-500 font-semibold">{active + 1} / {galleryImages.length}</span>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            disabled={active === 0}
-            onClick={() => goTo(active - 1)}
-            className="w-8 h-8 rounded-full border flex items-center justify-center bg-white shadow-sm disabled:opacity-40 transition"
-          >
-            <ChevronLeft className="w-4 h-4 text-gray-700" />
-          </button>
-          <button
-            type="button"
-            disabled={active === galleryImages.length - 1}
-            onClick={() => goTo(active + 1)}
-            className="w-8 h-8 rounded-full border flex items-center justify-center bg-white shadow-sm disabled:opacity-40 transition"
-          >
-            <ChevronRight className="w-4 h-4 text-gray-700" />
-          </button>
+
+      <div className="gallery-controls">
+        <button
+          type="button"
+          onClick={() => navigate(-1)}
+          className="gallery-nav-button"
+          aria-label="Previous gallery image"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+
+        <div className="gallery-dot-row" role="tablist" aria-label="Gallery image navigation">
+          {galleryImages.map((image, index) => (
+            <button
+              type="button"
+              key={image.src}
+              onClick={() => goTo(index)}
+              className={`gallery-dot ${active === index ? "gallery-dot-active" : ""}`}
+              aria-label={`Show image ${index + 1}`}
+              aria-current={active === index ? "true" : undefined}
+            />
+          ))}
         </div>
+
+        <p className="gallery-counter font-montserrat" aria-live="polite">
+          {active + 1} / {galleryImages.length}
+        </p>
+
+        <button
+          type="button"
+          onClick={() => navigate(1)}
+          className="gallery-nav-button"
+          aria-label="Next gallery image"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
       </div>
     </section>
   );
@@ -614,6 +710,7 @@ function SheetContent({
   onMusicPause,
   rsvpForm,
   rsvpStatus,
+  rsvpStatusIsError,
   isSubmitting,
   updateRsvpForm,
   submitRsvp,
@@ -625,6 +722,7 @@ function SheetContent({
   onMusicPause: () => void;
   rsvpForm: RsvpFormState;
   rsvpStatus: string;
+  rsvpStatusIsError: boolean;
   isSubmitting: boolean;
   updateRsvpForm: (patch: Partial<RsvpFormState>) => void;
   submitRsvp: (event: React.FormEvent<HTMLFormElement>) => void;
@@ -772,7 +870,14 @@ function SheetContent({
           </button>
         </form>
         {rsvpStatus && (
-          <p className="p-2 text-xs rounded-xl border border-green-500/20 bg-green-50 text-green-700 text-center" role="status">
+          <p
+            className={`p-2 text-xs rounded-xl border text-center ${
+              rsvpStatusIsError
+                ? "border-red-500/20 bg-red-50 text-red-700"
+                : "border-green-500/20 bg-green-50 text-green-700"
+            }`}
+            role={rsvpStatusIsError ? "alert" : "status"}
+          >
             {rsvpStatus}
           </p>
         )}
@@ -901,6 +1006,7 @@ export default function App() {
   const [wishes, setWishes] = useState<RsvpSubmission[]>(seedWishes);
   const [rsvpForm, setRsvpForm] = useState<RsvpFormState>(initialForm);
   const [rsvpStatus, setRsvpStatus] = useState("");
+  const [rsvpStatusIsError, setRsvpStatusIsError] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const playerRef = useRef<YouTubeControllerHandle>(null);
@@ -914,11 +1020,21 @@ export default function App() {
 
   const openInvitation = () => {
     setHasEntered(true);
-    // Play music after user interaction to bypass autoplay blocks
-    setTimeout(() => {
-      playerRef.current?.play();
-    }, 300);
   };
+
+  // Secondary autoplay attempt: retry play after entrance animation if music didn't start
+  useEffect(() => {
+    if (!hasEntered) return;
+    // Give the entrance animation time to complete, then check if music is playing
+    const timer = setTimeout(() => {
+      if (musicState !== "playing") {
+        playerRef.current?.play();
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+    // Only run when hasEntered changes, not on musicState changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasEntered]);
 
   const updateRsvpForm = (patch: Partial<RsvpFormState>) => {
     setRsvpForm((curr) => ({ ...curr, ...patch }));
@@ -927,17 +1043,15 @@ export default function App() {
   const submitRsvp = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setRsvpStatus("");
+    setRsvpStatusIsError(false);
     setIsSubmitting(true);
     try {
-      const submission = createRsvpSubmission(rsvpForm);
-      setWishes((curr) => {
-        const next = [submission, ...curr].slice(0, 20);
-        writeStoredWishes(next);
-        return next;
-      });
+      const result = await postRsvpSubmission(rsvpForm);
+      setWishes(result.submissions.slice(0, 20));
       setRsvpForm(initialForm);
-      setRsvpStatus("Terima kasih. RSVP anda telah disimpan.");
+      setRsvpStatus("Terima kasih. RSVP anda telah disimpan ke Excel.");
     } catch (error) {
+      setRsvpStatusIsError(true);
       setRsvpStatus(error instanceof Error ? error.message : "RSVP tidak dapat dihantar.");
     } finally {
       setIsSubmitting(false);
@@ -945,7 +1059,9 @@ export default function App() {
   };
 
   useEffect(() => {
-    setWishes(readStoredWishes());
+    fetchRsvpSubmissions()
+      .then((result) => setWishes(result.submissions.slice(0, 20)))
+      .catch(() => setWishes(seedWishes));
   }, []);
 
   return (
@@ -963,7 +1079,7 @@ export default function App() {
 
       {/* Entrance screen */}
       <AnimatePresence>
-        {!hasEntered && <EntranceScreen onEnter={openInvitation} />}
+        {!hasEntered && <EntranceScreen onActivate={() => playerRef.current?.play()} onEnter={openInvitation} />}
       </AnimatePresence>
 
       {/* Main card wrapper */}
@@ -989,7 +1105,7 @@ export default function App() {
                 backgroundRepeat: "repeat-y",
                 backgroundPosition: "top center"
               }}>
-                <MukadimahSection />
+                <WalimatulurusSection />
                 <div className="mx-6 h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
                 
                 <DetailsSection />
@@ -1022,23 +1138,26 @@ export default function App() {
                 }}
               >
                 <div className="absolute inset-0 bg-white/10 z-0 pointer-events-none" />
-                <div className="closing-card relative z-10 space-y-5 bg-white/70 backdrop-blur-md border border-amber-500/15 p-6 rounded-2xl shadow-lg max-w-sm mx-auto mb-10">
-                  <p className="section-kicker text-xs uppercase tracking-widest font-semibold" style={{ color: "#8d5267" }}>Kehadiran anda amat bermakna</p>
-                  <h2 className="closing-title font-greatvibes text-4xl" style={{ color: "#4a1228" }}>RSVP &amp; Hadiah</h2>
-                  <p className="closing-copy text-xs leading-5 text-gray-600">Sahkan kehadiran dan tinggalkan ucapan anda untuk pihak pengantin.</p>
-                  <div className="flex gap-2 justify-center">
+                <div className="closing-composition relative z-10 mx-auto mb-14 flex w-full max-w-sm flex-col items-center text-center">
+                  <p className="closing-eyebrow font-montserrat">Kehadiran Anda Amat Bermakna</p>
+                  <h2 className="closing-title font-playfair">RSVP &amp; Gift</h2>
+                  <p className="closing-copy font-playfair">
+                    Sahkan kehadiran dan tinggalkan ucapan. Ucapan terbaru akan dipaparkan di kad ini dan disimpan ke Excel.
+                  </p>
+                  <div className="closing-button-row">
                     <button
+                      type="button"
                       onClick={() => openSheet("rsvp")}
-                      className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold bg-[#842944] text-[#fff4d6] hover:brightness-115 active:scale-95 transition shadow"
+                      className="closing-pill-button"
                     >
-                      <Mail className="w-3.5 h-3.5" /> RSVP
+                      <Mail className="h-4 w-4" /> RSVP
                     </button>
                     <button
+                      type="button"
                       onClick={() => openSheet("gift")}
-                      className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold bg-white border text-[#842944] hover:bg-gray-50 active:scale-95 transition shadow-sm"
-                      style={{ borderColor: "rgba(196,157,96,0.3)" }}
+                      className="closing-pill-button"
                     >
-                      <Gift className="w-3.5 h-3.5" /> Gift
+                      <Gift className="h-4 w-4" /> GIFT
                     </button>
                   </div>
                 </div>
@@ -1098,6 +1217,7 @@ export default function App() {
                       onMusicPause={() => playerRef.current?.pause()}
                       rsvpForm={rsvpForm}
                       rsvpStatus={rsvpStatus}
+                      rsvpStatusIsError={rsvpStatusIsError}
                       isSubmitting={isSubmitting}
                       updateRsvpForm={updateRsvpForm}
                       submitRsvp={submitRsvp}

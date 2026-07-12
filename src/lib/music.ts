@@ -27,7 +27,15 @@ export function buildYouTubeControllerUrl(youtubeUrl: string, startAt: string, e
   if (!videoId) return "";
   const start = parseTimestamp(startAt) ?? 0;
   const end = endAt ? parseTimestamp(endAt) : null;
-  const params = new URLSearchParams({ enablejsapi: "1", playsinline: "1", rel: "0", start: String(start) });
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const params = new URLSearchParams({
+    enablejsapi: "1",
+    playsinline: "1",
+    rel: "0",
+    start: String(start),
+    autoplay: "0",
+    ...(origin ? { origin } : {}),
+  });
   if (end !== null && end > start) params.set("end", String(end));
   return `https://www.youtube-nocookie.com/embed/${videoId}?${params.toString()}`;
 }
