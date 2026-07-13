@@ -261,7 +261,15 @@ function AnimatedSection({ children, className = "" }: { children: React.ReactNo
 }
 
 // ─── Entrance Screen ──────────────────────────────────────────────────────────
-function EntranceScreen({ onActivate, onEnter }: { onActivate: () => void; onEnter: () => void }) {
+function EntranceScreen({
+  onActivate,
+  onEnter,
+  onFinish,
+}: {
+  onActivate: () => void;
+  onEnter: () => void;
+  onFinish: () => void;
+}) {
   const [opening, setOpening] = useState(false);
   const reduceMotion = useReducedMotion();
 
@@ -269,7 +277,8 @@ function EntranceScreen({ onActivate, onEnter }: { onActivate: () => void; onEnt
     if (opening) return;
     onActivate();
     setOpening(true);
-    setTimeout(() => onEnter(), reduceMotion ? 220 : 1100);
+    onEnter();
+    window.setTimeout(onFinish, reduceMotion ? 320 : 1200);
   };
 
   // Floating gold particles for entrance
@@ -284,39 +293,38 @@ function EntranceScreen({ onActivate, onEnter }: { onActivate: () => void; onEnt
   return (
     <motion.div
       className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden"
-      style={{
-        backgroundImage: "url('/Opening Gate Background.png')",
-        backgroundSize: "cover",
-        backgroundPosition: "center"
-      }}
       animate={opening ? { opacity: 0 } : { opacity: 1 }}
-      transition={{ duration: reduceMotion ? 0.15 : 0.5, delay: opening && !reduceMotion ? 0.8 : 0 }}
+      transition={{ duration: reduceMotion ? 0.2 : 0.42, delay: opening && !reduceMotion ? 0.76 : 0 }}
     >
       <motion.div
-        className="absolute inset-y-0 left-0 w-1/2 origin-left"
-        style={{
-          background: "linear-gradient(135deg, rgba(78, 13, 30, 0.95) 0%, rgba(47, 3, 18, 0.98) 100%)",
-          borderRight: "1px solid rgba(196, 157, 96, 0.3)"
-        }}
+        className="opening-gate-panel opening-gate-panel-left absolute inset-y-0 left-0 w-1/2 origin-left overflow-hidden"
+        style={{ borderRight: "1px solid rgba(196, 157, 96, 0.3)" }}
         animate={opening ? { x: "-100%" } : { x: 0 }}
-        transition={{ duration: reduceMotion ? 0.18 : 0.8, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: reduceMotion ? 0.26 : 0.9, ease: [0.22, 1, 0.36, 1] }}
       >
+        <div className="absolute inset-y-0 left-0 w-[200%]" style={{
+          backgroundImage: "url('/Opening Gate Background.png')",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+        }} />
         <div className="absolute inset-0" style={{
-          background: "linear-gradient(135deg, rgba(255,255,255,0.05) 0%, transparent 50%)"
+          background: "linear-gradient(135deg, rgba(78, 13, 30, 0.9) 0%, rgba(47, 3, 18, 0.95) 100%)"
         }} />
       </motion.div>
 
       <motion.div
-        className="absolute inset-y-0 right-0 w-1/2 origin-right"
-        style={{
-          background: "linear-gradient(225deg, rgba(78, 13, 30, 0.95) 0%, rgba(47, 3, 18, 0.98) 100%)",
-          borderLeft: "1px solid rgba(255, 255, 255, 0.15)"
-        }}
+        className="opening-gate-panel opening-gate-panel-right absolute inset-y-0 right-0 w-1/2 origin-right overflow-hidden"
+        style={{ borderLeft: "1px solid rgba(255, 255, 255, 0.15)" }}
         animate={opening ? { x: "100%" } : { x: 0 }}
-        transition={{ duration: reduceMotion ? 0.18 : 0.8, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: reduceMotion ? 0.26 : 0.9, ease: [0.22, 1, 0.36, 1] }}
       >
+        <div className="absolute inset-y-0 right-0 w-[200%]" style={{
+          backgroundImage: "url('/Opening Gate Background.png')",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+        }} />
         <div className="absolute inset-0" style={{
-          background: "linear-gradient(225deg, rgba(255,255,255,0.05) 0%, transparent 50%)"
+          background: "linear-gradient(225deg, rgba(78, 13, 30, 0.9) 0%, rgba(47, 3, 18, 0.95) 100%)"
         }} />
       </motion.div>
 
@@ -348,29 +356,27 @@ function EntranceScreen({ onActivate, onEnter }: { onActivate: () => void; onEnt
           onClick={handleClick}
           disabled={opening}
           className="opening-emblem-button relative flex items-center justify-center rounded-full focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-200/80 focus-visible:ring-offset-4 focus-visible:ring-offset-[#3a0311] disabled:cursor-default"
-          animate={opening
-            ? { scale: 0.82, opacity: 0 }
-            : reduceMotion
-              ? { scale: 1 }
-              : { scale: [1, 1.035, 1] }
-          }
-          transition={opening
-            ? { duration: reduceMotion ? 0.12 : 0.28 }
-            : { duration: 2.4, repeat: reduceMotion ? 0 : Infinity, ease: "easeInOut" }
-          }
+          animate={opening ? { scale: 0.82, opacity: 0 } : { scale: 1, opacity: 1 }}
+          transition={{ duration: opening ? (reduceMotion ? 0.12 : 0.28) : 0 }}
           aria-label="Open Nashuha and Shafiq wedding invitation"
         >
-          {/* Radial pulse glow */}
-          <div className="emblem-radial-pulse" />
-          {/* Rotating glow rings */}
-          <div className="emblem-glow-ring" />
-          <div className="emblem-glow-ring emblem-glow-ring-outer" />
-          <img
-            src="/shua-opening-emblem.png"
-            alt=""
-            className="opening-emblem-image h-full w-full select-none object-contain relative z-10"
-            draggable={false}
-          />
+          <motion.span
+            className="absolute inset-0 flex items-center justify-center"
+            animate={opening || reduceMotion ? { scale: 1 } : { scale: [1, 1.035, 1] }}
+            transition={{ duration: 2.4, repeat: opening || reduceMotion ? 0 : Infinity, ease: "easeInOut" }}
+          >
+            {/* Radial pulse glow */}
+            <div className="emblem-radial-pulse" />
+            {/* Rotating glow rings */}
+            <div className="emblem-glow-ring" />
+            <div className="emblem-glow-ring emblem-glow-ring-outer" />
+            <img
+              src="/shua-opening-emblem.png"
+              alt=""
+              className="opening-emblem-image h-full w-full select-none object-contain relative z-10"
+              draggable={false}
+            />
+          </motion.span>
         </motion.button>
 
         <motion.p
@@ -1417,6 +1423,7 @@ function SheetContent({
 // ─── Main App Component ───────────────────────────────────────────────────────
 export default function App() {
   const [hasEntered, setHasEntered] = useState(false);
+  const [showEntrance, setShowEntrance] = useState(true);
   const [active, setActive] = useState<DockPanel | null>(null);
   const [musicState, setMusicState] = useState<AudioPlaybackState>("loading");
   const [musicProgress, setMusicProgress] = useState<AudioProgress>({ currentTime: 0, duration: 0, buffered: 0 });
@@ -1496,7 +1503,13 @@ export default function App() {
 
       {/* Entrance screen */}
       <AnimatePresence>
-        {!hasEntered && <EntranceScreen onActivate={() => playerRef.current?.play()} onEnter={openInvitation} />}
+        {showEntrance && (
+          <EntranceScreen
+            onActivate={() => playerRef.current?.play()}
+            onEnter={openInvitation}
+            onFinish={() => setShowEntrance(false)}
+          />
+        )}
       </AnimatePresence>
 
       {/* Main card wrapper */}

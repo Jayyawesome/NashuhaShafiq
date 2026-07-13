@@ -1,4 +1,4 @@
-import { forwardRef, memo, useCallback, useImperativeHandle, useRef } from "react";
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef } from "react";
 
 export type AudioPlaybackState = "loading" | "ready" | "playing" | "paused" | "blocked" | "ended" | "error";
 export type AudioProgress = { currentTime: number; duration: number; buffered: number };
@@ -23,6 +23,7 @@ function PersistentAudioPlayerImpl(
   ref: React.ForwardedRef<AudioControllerHandle>,
 ) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const initialSeekAppliedRef = useRef(false);
 
   const reportProgress = useCallback(() => {
     const audio = audioRef.current;
@@ -39,14 +40,34 @@ function PersistentAudioPlayerImpl(
     });
   }, [onProgressChange]);
 
+  const seekToConfiguredStart = useCallback((force = false) => {
+    const audio = audioRef.current;
+    if (!audio || (!force && initialSeekAppliedRef.current)) return false;
+
+    const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+    if (!duration) return false;
+
+    const target = startAt >= 0 && startAt < duration ? startAt : 0;
+    try {
+      audio.currentTime = target;
+      initialSeekAppliedRef.current = Math.abs(audio.currentTime - target) < 1;
+      reportProgress();
+      return initialSeekAppliedRef.current;
+    } catch {
+      return false;
+    }
+  }, [reportProgress, startAt]);
+
   const play = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
+    seekToConfiguredStart();
+
     void audio.play().catch((error: DOMException) => {
       onStateChange(error.name === "NotAllowedError" ? "blocked" : "error");
     });
-  }, [onStateChange]);
+  }, [onStateChange, seekToConfiguredStart]);
 
   const pause = useCallback(() => {
     audioRef.current?.pause();
@@ -63,14 +84,9 @@ function PersistentAudioPlayerImpl(
 
   useImperativeHandle(ref, () => ({ play, pause, seek }), [pause, play, seek]);
 
-  const startFromConfiguredTime = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
-    audio.currentTime = startAt >= 0 && startAt < duration ? startAt : 0;
-    reportProgress();
-  }, [reportProgress, startAt]);
+  useEffect(() => {
+    initialSeekAppliedRef.current = false;
+  }, [src, startAt]);
 
   return (
     <audio
@@ -78,20 +94,30 @@ function PersistentAudioPlayerImpl(
       className="persistent-audio-player"
       src={src}
       preload="auto"
+      playsInline
       onLoadStart={() => onStateChange("loading")}
-      onLoadedMetadata={startFromConfiguredTime}
+      onLoadedMetadata={() => seekToConfiguredStart()}
       onCanPlay={() => {
+        seekToConfiguredStart();
         if (audioRef.current?.paused) onStateChange("ready");
         reportProgress();
       }}
-      onPlay={() => onStateChange("playing")}
+      onPlay={() => {
+        seekToConfiguredStart();
+        onStateChange("playing");
+      }}
+      onPlaying={() => {
+        seekToConfiguredStart();
+        onStateChange("playing");
+      }}
       onPause={() => onStateChange("paused")}
       onTimeUpdate={reportProgress}
       onDurationChange={reportProgress}
       onProgress={reportProgress}
       onEnded={() => {
         onStateChange("ended");
-        startFromConfiguredTime();
+        initialSeekAppliedRef.current = false;
+        seekToConfiguredStart(true);
         play();
       }}
       onError={() => onStateChange("error")}
