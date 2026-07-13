@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { motion, AnimatePresence, useReducedMotion } from "motion/react";
+import { Fragment, useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { motion, AnimatePresence, useReducedMotion, useScroll, useTransform } from "motion/react";
 import {
   MapPin,
   Phone,
@@ -17,14 +17,16 @@ import {
   ChevronLeft,
   ChevronRight
 } from "lucide-react";
-import { PersistentYouTubePlayer } from "../components/PersistentYouTubePlayer";
-import type { YouTubeControllerHandle, YouTubePlaybackState } from "../components/PersistentYouTubePlayer";
+import { PersistentAudioPlayer } from "../components/PersistentAudioPlayer";
+import type { AudioControllerHandle, AudioPlaybackState, AudioProgress } from "../components/PersistentAudioPlayer";
 import { attendanceOptions, seedWishes } from "../lib/rsvp";
 import type { AttendanceStatus, RsvpSubmission } from "../lib/rsvp";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const musicUrl = "https://youtu.be/ZeFpigRaXbI?si=HgKqlOVWbGeV0twY";
-const musicStartAt = "01:53";
+const musicSrc = "/lagu-pernikahan-kita.mp3";
+const musicStartAt = 113;
+const musicTitle = "Lagu Pernikahan Kita";
+const musicArtist = "Tiara Andini & Arsy Widianto";
 const eventDateTime = "2026-08-22T12:00:00+08:00";
 
 const eventDetails = {
@@ -39,9 +41,9 @@ const eventDetails = {
 };
 
 const contacts = [
-  { name: "Sarina", relation: "Ibu", phone: "0194778469" },
-  { name: "Jeffri", relation: "Bapa", phone: "0135895304" },
-  { name: "Syazwani", relation: "Kakak", phone: "0194013804" },
+  { name: "Sarina Mat Din", relation: "Ibu", phone: "0194778469" },
+  { name: "Jeffri Mat Jaafar", relation: "Bapa", phone: "0135895304" },
+  { name: "Fatin Syazwani Jeffri", relation: "Kakak", phone: "0194013804" },
 ];
 
 const giftDetails = {
@@ -63,6 +65,30 @@ type DockPanel = "time" | "location" | "rsvp" | "gift" | "contact" | "music";
 type CountdownParts = { days: number; hours: number; minutes: number; seconds: number };
 type RsvpFormState = { name: string; attendance: AttendanceStatus; pax: number; phone: string; wish: string };
 type RsvpApiResponse = { submissions: RsvpSubmission[]; workbook: string };
+
+function AestheticAmpersand() {
+  return <span className="aesthetic-ampersand">&amp;</span>;
+}
+
+function TextWithAmpersands({ text }: { text: string }) {
+  return (
+    <>
+      {text.split("&").map((part, index) => (
+        <Fragment key={`${index}-${part}`}>
+          {index > 0 && <AestheticAmpersand />}
+          {part}
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+function formatMusicTime(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+  const wholeSeconds = Math.floor(seconds);
+  const minutes = Math.floor(wholeSeconds / 60);
+  return `${minutes}:${String(wholeSeconds % 60).padStart(2, "0")}`;
+}
 
 const initialForm: RsvpFormState = {
   name: "",
@@ -246,6 +272,15 @@ function EntranceScreen({ onActivate, onEnter }: { onActivate: () => void; onEnt
     setTimeout(() => onEnter(), reduceMotion ? 220 : 1100);
   };
 
+  // Floating gold particles for entrance
+  const particles = useMemo(() =>
+    Array.from({ length: 8 }, (_, i) => ({
+      left: `${12 + i * 11}%`,
+      size: 3 + Math.random() * 3,
+      delay: i * 0.6,
+      duration: 3 + Math.random() * 2,
+    })), []);
+
   return (
     <motion.div
       className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden"
@@ -291,6 +326,22 @@ function EntranceScreen({ onActivate, onEnter }: { onActivate: () => void; onEnt
         animate={opening ? { opacity: 0 } : { opacity: 1 }}
       />
 
+      {/* Floating gold particles */}
+      {!reduceMotion && particles.map((p, i) => (
+        <div
+          key={i}
+          className="gold-particle"
+          style={{
+            left: p.left,
+            bottom: "20%",
+            width: p.size,
+            height: p.size,
+            animationDuration: `${p.duration}s`,
+            animationDelay: `${p.delay}s`,
+          }}
+        />
+      ))}
+
       <div className="relative z-10 flex flex-col items-center gap-5 px-8 text-center">
         <motion.button
           type="button"
@@ -309,10 +360,15 @@ function EntranceScreen({ onActivate, onEnter }: { onActivate: () => void; onEnt
           }
           aria-label="Open Nashuha and Shafiq wedding invitation"
         >
+          {/* Radial pulse glow */}
+          <div className="emblem-radial-pulse" />
+          {/* Rotating glow rings */}
+          <div className="emblem-glow-ring" />
+          <div className="emblem-glow-ring emblem-glow-ring-outer" />
           <img
             src="/shua-opening-emblem.png"
             alt=""
-            className="opening-emblem-image h-full w-full select-none object-contain"
+            className="opening-emblem-image h-full w-full select-none object-contain relative z-10"
             draggable={false}
           />
         </motion.button>
@@ -332,20 +388,59 @@ function EntranceScreen({ onActivate, onEnter }: { onActivate: () => void; onEnt
 
 // ─── Cover Page ───────────────────────────────────────────────────────────────
 function CoverPage() {
+  const reduceMotion = useReducedMotion();
+  const ref = useRef<HTMLDivElement>(null);
+  const { scrollYProgress } = useScroll({
+    target: ref,
+    offset: ["start start", "end start"],
+  });
+  const bgY = useTransform(scrollYProgress, [0, 1], ["0%", "20%"]);
+
   const sparkles = Array.from({ length: 8 }, (_, i) => ({
     x: [15, 80, 25, 70, 10, 90, 40, 60][i],
     y: [20, 15, 75, 80, 50, 45, 10, 85][i],
     delay: i * 0.4,
   }));
 
+  // Generate petals data
+  const petals = useMemo(() =>
+    Array.from({ length: 12 }, (_, i) => ({
+      left: `${5 + (i * 8) % 90}%`,
+      size: 10 + Math.random() * 8,
+      duration: 6 + Math.random() * 6,
+      delay: i * 0.8,
+    })), []);
+
   return (
-    <div className="cover-page-shell relative flex h-full min-h-screen flex-col items-center justify-start overflow-hidden">
-      {/* Background Image */}
-      <div className="absolute inset-0" style={{
-        backgroundImage: "url('/Main Page.png')",
-        backgroundSize: "cover",
-        backgroundPosition: "center"
-      }} />
+    <div ref={ref} className="cover-page-shell relative flex h-full min-h-screen flex-col items-center justify-start overflow-hidden">
+      {/* Parallax Background Image */}
+      <motion.div
+        className="absolute inset-0"
+        style={{
+          backgroundImage: "url('/Main Page.png')",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          y: reduceMotion ? 0 : bgY,
+        }}
+      />
+
+      {/* Gold shimmer overlay */}
+      <div className="cover-shimmer-overlay" />
+
+      {/* Falling petals */}
+      {!reduceMotion && petals.map((p, i) => (
+        <div
+          key={i}
+          className="petal"
+          style={{
+            left: p.left,
+            width: p.size,
+            height: p.size,
+            animationDuration: `${p.duration}s`,
+            animationDelay: `${p.delay}s`,
+          }}
+        />
+      ))}
 
       {/* Sparkles */}
       {sparkles.map((s, i) => <Sparkle key={i} {...s} />)}
@@ -355,33 +450,127 @@ function CoverPage() {
 
 // ─── Mukadimah Section ────────────────────────────────────────────────────────
 function MukadimahSection() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setVisible(true); },
+      { threshold: 0.15 }
+    );
+    if (ref.current) observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <AnimatedSection className="invitation-section invitation-section-intro px-6 py-12 text-center">
-      <p className="font-playfair text-2xl mb-5 leading-relaxed" style={{ color: "#842944", direction: "rtl" }}>
-        بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ
-      </p>
-      <OrnamentDivider />
-      <p className="section-kicker font-montserrat text-xs tracking-widest uppercase font-semibold mt-6 mb-3" style={{ color: "#4a1228" }}>
-        Assalamualaikum dan Salam Sejahtera
-      </p>
-      <p className="guest-line font-playfair text-xs tracking-wider italic mb-6" style={{ color: "#8d5267" }}>
-        Dato&apos; / Datin / Tuan / Puan / Encik / Cik
-      </p>
-      <p className="body-copy font-montserrat text-[13px] leading-7 mb-6" style={{ color: "#3d0e20" }}>
-        Dengan segala hormatnya dan penuh kesyukuran ke hadrat Ilahi, kami mempersilakan kehadiran Tuan/Puan ke majlis perkahwinan anakanda kami:
-      </p>
-      <p className="names-script font-greatvibes text-4xl mb-1" style={{ color: "#4a1228" }}>Fatin Nashuha</p>
-      <p className="font-montserrat text-[11px] tracking-widest uppercase mb-3" style={{ color: "#8d5267" }}>Binti Jeffri</p>
-      <p className="font-montserrat text-lg mb-3" style={{ color: "#b8894a" }}>&amp;</p>
-      <p className="names-script font-greatvibes text-4xl mb-1" style={{ color: "#4a1228" }}>Mohamad Shafiq</p>
-      <p className="font-montserrat text-[11px] tracking-widest uppercase mb-8" style={{ color: "#8d5267" }}>Bin Mohd Shakri</p>
-      <p className="font-montserrat text-[10px] tracking-widest uppercase mb-1" style={{ color: "#b8894a" }}>— Daripada —</p>
-      <p className="parent-names font-playfair text-sm leading-7" style={{ color: "#3d0e20" }}>
-        <strong>Jeffri Bin Mat Jaafar</strong><br />
-        &amp; <strong>Sarina Binti Mat Din @ Samsudin</strong>
-      </p>
-      <div className="mt-8">
+      <div ref={ref}>
+        {/* Bismillah with blur-to-sharp */}
+        <motion.p
+          className="font-playfair text-2xl mb-5 leading-relaxed"
+          style={{ color: "#842944", direction: "rtl" }}
+          initial={{ opacity: 0, y: 15, filter: "blur(8px)" }}
+          animate={visible ? { opacity: 1, y: 0, filter: "blur(0px)" } : {}}
+          transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+        >
+          بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ
+        </motion.p>
         <OrnamentDivider />
+        <motion.p
+          className="section-kicker font-montserrat text-xs tracking-widest uppercase font-semibold mt-6 mb-3"
+          style={{ color: "#4a1228" }}
+          initial={{ opacity: 0, y: 10 }}
+          animate={visible ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.6, delay: 0.2 }}
+        >
+          Assalamualaikum dan Salam Sejahtera
+        </motion.p>
+        <motion.p
+          className="guest-line font-playfair text-xs tracking-wider italic mb-6"
+          style={{ color: "#8d5267" }}
+          initial={{ opacity: 0 }}
+          animate={visible ? { opacity: 1 } : {}}
+          transition={{ duration: 0.6, delay: 0.35 }}
+        >
+          Dato&apos; / Datin / Tuan / Puan / Encik / Cik
+        </motion.p>
+        <motion.p
+          className="body-copy font-montserrat text-[13px] leading-7 mb-6"
+          style={{ color: "#3d0e20" }}
+          initial={{ opacity: 0, y: 10 }}
+          animate={visible ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.6, delay: 0.45 }}
+        >
+          Dengan segala hormatnya dan penuh kesyukuran ke hadrat Ilahi, kami mempersilakan kehadiran Tuan/Puan ke majlis perkahwinan anakanda kami:
+        </motion.p>
+
+        {/* Staggered couple names with shimmer */}
+        <motion.p
+          className="names-script font-greatvibes text-4xl mb-1 shimmer-text"
+          initial={{ opacity: 0, y: 20, scale: 0.95 }}
+          animate={visible ? { opacity: 1, y: 0, scale: 1 } : {}}
+          transition={{ duration: 0.7, delay: 0.55, ease: [0.22, 1, 0.36, 1] }}
+        >
+          Fatin Nashuha
+        </motion.p>
+        <motion.p
+          className="font-montserrat text-[11px] tracking-widest uppercase mb-3"
+          style={{ color: "#8d5267" }}
+          initial={{ opacity: 0 }}
+          animate={visible ? { opacity: 1 } : {}}
+          transition={{ duration: 0.5, delay: 0.65 }}
+        >
+          Binti Jeffri
+        </motion.p>
+        <motion.p
+          className="font-montserrat text-lg mb-3"
+          style={{ color: "#b8894a" }}
+          initial={{ opacity: 0, scale: 0.5 }}
+          animate={visible ? { opacity: 1, scale: 1 } : {}}
+          transition={{ duration: 0.4, delay: 0.75, type: "spring", stiffness: 300 }}
+        >
+          <AestheticAmpersand />
+        </motion.p>
+        <motion.p
+          className="names-script font-greatvibes text-4xl mb-1 shimmer-text"
+          initial={{ opacity: 0, y: 20, scale: 0.95 }}
+          animate={visible ? { opacity: 1, y: 0, scale: 1 } : {}}
+          transition={{ duration: 0.7, delay: 0.85, ease: [0.22, 1, 0.36, 1] }}
+        >
+          Mohamad Shafiq
+        </motion.p>
+        <motion.p
+          className="font-montserrat text-[11px] tracking-widest uppercase mb-8"
+          style={{ color: "#8d5267" }}
+          initial={{ opacity: 0 }}
+          animate={visible ? { opacity: 1 } : {}}
+          transition={{ duration: 0.5, delay: 0.95 }}
+        >
+          Bin Mohd Shakri
+        </motion.p>
+
+        <motion.p
+          className="font-montserrat text-[10px] tracking-widest uppercase mb-1"
+          style={{ color: "#b8894a" }}
+          initial={{ opacity: 0 }}
+          animate={visible ? { opacity: 1 } : {}}
+          transition={{ duration: 0.5, delay: 1.05 }}
+        >
+          — Daripada —
+        </motion.p>
+        <motion.p
+          className="parent-names font-playfair text-sm leading-7"
+          style={{ color: "#3d0e20" }}
+          initial={{ opacity: 0, y: 10 }}
+          animate={visible ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.6, delay: 1.15 }}
+        >
+          <strong>Jeffri Bin Mat Jaafar</strong><br />
+          <AestheticAmpersand /> <strong>Sarina Binti Mat Din @ Samsudin</strong>
+        </motion.p>
+        <div className="mt-8">
+          <OrnamentDivider />
+        </div>
       </div>
     </AnimatedSection>
   );
@@ -389,90 +578,213 @@ function MukadimahSection() {
 
 // ─── Details Section ──────────────────────────────────────────────────────────
 function WalimatulurusSection() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setVisible(true); },
+      { threshold: 0.15 }
+    );
+    if (ref.current) observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <AnimatedSection className="invitation-copy-section px-7 py-14 text-center">
-      <p className="parent-names font-playfair font-semibold">Jeffri Bin Mat Jaafar</p>
-      <p className="decorative-ampersand font-greatvibes">&amp;</p>
-      <p className="parent-names font-playfair font-semibold">Sarina Binti Mat Din @ Samsudin</p>
+      <div ref={ref}>
+        <motion.p
+          className="parent-names font-playfair font-semibold"
+          initial={{ opacity: 0, letterSpacing: "0.3em" }}
+          animate={visible ? { opacity: 1, letterSpacing: "0em" } : {}}
+          transition={{ duration: 0.8, delay: 0.1 }}
+        >
+          Jeffri Bin Mat Jaafar
+        </motion.p>
+        <motion.p
+          className="decorative-ampersand font-greatvibes"
+          initial={{ opacity: 0, scale: 0.5 }}
+          animate={visible ? { opacity: 1, scale: 1 } : {}}
+          transition={{ duration: 0.4, delay: 0.25, type: "spring", stiffness: 300 }}
+        >
+          <AestheticAmpersand />
+        </motion.p>
+        <motion.p
+          className="parent-names font-playfair font-semibold"
+          initial={{ opacity: 0, letterSpacing: "0.3em" }}
+          animate={visible ? { opacity: 1, letterSpacing: "0em" } : {}}
+          transition={{ duration: 0.8, delay: 0.35 }}
+        >
+          Sarina Binti Mat Din @ Samsudin
+        </motion.p>
 
-      <h1 className="walimatulurus-title font-greatvibes">Walimatulurus</h1>
+        {/* Grand title with scale + blur */}
+        <motion.h1
+          className="walimatulurus-title font-greatvibes golden-underline"
+          initial={{ opacity: 0, scale: 0.7, filter: "blur(10px)" }}
+          animate={visible ? { opacity: 1, scale: 1, filter: "blur(0px)" } : {}}
+          transition={{ duration: 1, delay: 0.5, ease: [0.22, 1, 0.36, 1] }}
+        >
+          Walimatulurus
+        </motion.h1>
 
-      <p className="invitation-verse font-playfair">
-        Setepak sirih, sekacip pinang, semekar senyuman, seikhlas hati
-      </p>
-      <p className="invitation-copy-line font-playfair">
-        Dengan penuh kesyukuran ke hadrat Ilahi
-      </p>
-      <p className="invitation-copy-line font-playfair">
-        Mengundang Dato&apos; / Datin / Tuan / Puan / Encik / Cik
-      </p>
+        <motion.p
+          className="invitation-verse font-playfair"
+          initial={{ opacity: 0, y: 10 }}
+          animate={visible ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.6, delay: 0.7 }}
+        >
+          Setepak sirih, sekacip pinang, semekar senyuman, seikhlas hati
+        </motion.p>
+        <motion.p
+          className="invitation-copy-line font-playfair"
+          initial={{ opacity: 0, y: 10 }}
+          animate={visible ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.6, delay: 0.8 }}
+        >
+          Dengan penuh kesyukuran ke hadrat Ilahi
+        </motion.p>
+        <motion.p
+          className="invitation-copy-line font-playfair"
+          initial={{ opacity: 0, y: 10 }}
+          animate={visible ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.6, delay: 0.9 }}
+        >
+          Mengundang Dato&apos; / Datin / Tuan / Puan / Encik / Cik
+        </motion.p>
 
-      <div className="dotted-gold-divider" aria-hidden="true" />
+        <div className="dotted-gold-divider" aria-hidden="true" />
 
-      <p className="invitation-copy-line font-playfair">
-        ke majlis perkahwinan anakanda kami
-      </p>
+        <motion.p
+          className="invitation-copy-line font-playfair"
+          initial={{ opacity: 0, y: 10 }}
+          animate={visible ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.6, delay: 1.0 }}
+        >
+          ke majlis perkahwinan anakanda kami
+        </motion.p>
 
-      <p className="couple-formal-name font-playfair font-semibold">Fatin Nashuha Binti Jeffri</p>
-      <p className="decorative-ampersand font-greatvibes">&amp;</p>
-      <p className="couple-formal-name font-playfair font-semibold">Mohamad Shafiq Bin Mohd Shakri</p>
+        <motion.p
+          className="couple-formal-name font-playfair font-semibold shimmer-text"
+          initial={{ opacity: 0, y: 15 }}
+          animate={visible ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.7, delay: 1.1 }}
+        >
+          Fatin Nashuha Binti Jeffri
+        </motion.p>
+        <motion.p
+          className="decorative-ampersand font-greatvibes"
+          initial={{ opacity: 0, scale: 0.5 }}
+          animate={visible ? { opacity: 1, scale: 1 } : {}}
+          transition={{ duration: 0.4, delay: 1.2, type: "spring", stiffness: 300 }}
+        >
+          <AestheticAmpersand />
+        </motion.p>
+        <motion.p
+          className="couple-formal-name font-playfair font-semibold shimmer-text"
+          initial={{ opacity: 0, y: 15 }}
+          animate={visible ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.7, delay: 1.3 }}
+        >
+          Mohamad Shafiq Bin Mohd Shakri
+        </motion.p>
+      </div>
     </AnimatedSection>
   );
 }
 
 function DetailsSection() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setVisible(true); },
+      { threshold: 0.15 }
+    );
+    if (ref.current) observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, []);
+
   const links = mapLinks();
   return (
     <AnimatedSection className="invitation-section px-6 py-9 text-center">
-      <p className="section-kicker font-montserrat text-xs tracking-widest uppercase font-semibold mb-6" style={{ color: "#4a1228" }}>
-        Butiran Majlis
-      </p>
-
-      <div className="detail-stack space-y-6">
-        <div>
-          <p className="detail-label font-montserrat text-[10px] tracking-widest uppercase mb-2" style={{ color: "#b8894a" }}>Lokasi</p>
-          <p className="detail-value font-playfair text-lg font-bold mb-1" style={{ color: "#4a1228" }}>{eventDetails.venueName}</p>
-          <p className="detail-address font-montserrat text-xs leading-6" style={{ color: "#3d0e20" }}>
-            {eventDetails.venueAddress}
-          </p>
-        </div>
-
-        <div className="h-px w-32 mx-auto bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
-
-        <div>
-          <p className="detail-label font-montserrat text-[10px] tracking-widest uppercase mb-2" style={{ color: "#b8894a" }}>Tarikh</p>
-          <p className="detail-value font-playfair text-base font-semibold" style={{ color: "#4a1228" }}>{eventDetails.dateLabel}</p>
-        </div>
-
-        <div className="h-px w-32 mx-auto bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
-
-        <div>
-          <p className="detail-label font-montserrat text-[10px] tracking-widest uppercase mb-2" style={{ color: "#b8894a" }}>Masa</p>
-          <p className="detail-value font-playfair text-base font-semibold" style={{ color: "#4a1228" }}>{eventDetails.timeLabel}</p>
-        </div>
-      </div>
-
-      <div className="flex justify-center gap-3 mt-8">
-        <a
-          href={links.google}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="action-link inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs tracking-wide transition hover:bg-amber-50 active:scale-95 shadow-sm font-semibold"
-          style={{ borderColor: "rgba(196,157,96,0.3)", color: "#4a1228", background: "rgba(255,255,255,0.7)" }}
+      <div ref={ref}>
+        <motion.p
+          className="section-kicker font-montserrat text-xs tracking-widest uppercase font-semibold mb-6"
+          style={{ color: "#4a1228" }}
+          initial={{ opacity: 0, y: 10 }}
+          animate={visible ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.6 }}
         >
-          <MapPin className="w-3.5 h-3.5" />
-          Google Maps
-        </a>
-        <a
-          href={links.waze}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="action-link inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs tracking-wide transition hover:bg-amber-50 active:scale-95 shadow-sm font-semibold"
-          style={{ borderColor: "rgba(196,157,96,0.3)", color: "#4a1228", background: "rgba(255,255,255,0.7)" }}
+          Butiran Majlis
+        </motion.p>
+
+        <div className="detail-stack space-y-6">
+          <motion.div
+            initial={{ opacity: 0, y: 15 }}
+            animate={visible ? { opacity: 1, y: 0 } : {}}
+            transition={{ duration: 0.6, delay: 0.1 }}
+          >
+            <p className="detail-label font-montserrat text-[10px] tracking-widest uppercase mb-2" style={{ color: "#b8894a" }}>Lokasi</p>
+            <p className="detail-value font-playfair text-lg font-bold mb-1" style={{ color: "#4a1228" }}>
+              <TextWithAmpersands text={eventDetails.venueName} />
+            </p>
+            <p className="detail-address font-montserrat text-xs leading-6" style={{ color: "#3d0e20" }}>
+              {eventDetails.venueAddress}
+            </p>
+          </motion.div>
+
+          <div className="h-px w-32 mx-auto bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+
+          <motion.div
+            initial={{ opacity: 0, y: 15 }}
+            animate={visible ? { opacity: 1, y: 0 } : {}}
+            transition={{ duration: 0.6, delay: 0.25 }}
+          >
+            <p className="detail-label font-montserrat text-[10px] tracking-widest uppercase mb-2" style={{ color: "#b8894a" }}>Tarikh</p>
+            <p className="detail-value font-playfair text-base font-semibold" style={{ color: "#4a1228" }}>{eventDetails.dateLabel}</p>
+          </motion.div>
+
+          <div className="h-px w-32 mx-auto bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+
+          <motion.div
+            initial={{ opacity: 0, y: 15 }}
+            animate={visible ? { opacity: 1, y: 0 } : {}}
+            transition={{ duration: 0.6, delay: 0.4 }}
+          >
+            <p className="detail-label font-montserrat text-[10px] tracking-widest uppercase mb-2" style={{ color: "#b8894a" }}>Masa</p>
+            <p className="detail-value font-playfair text-base font-semibold" style={{ color: "#4a1228" }}>{eventDetails.timeLabel}</p>
+          </motion.div>
+        </div>
+
+        <motion.div
+          className="flex justify-center gap-3 mt-8"
+          initial={{ opacity: 0, y: 15 }}
+          animate={visible ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.6, delay: 0.55 }}
         >
-          <Navigation className="w-3.5 h-3.5" />
-          Waze
-        </a>
+          <a
+            href={links.google}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="action-link inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs tracking-wide transition hover:bg-amber-50 active:scale-95 shadow-sm font-semibold"
+            style={{ borderColor: "rgba(196,157,96,0.3)", color: "#4a1228", background: "rgba(255,255,255,0.7)" }}
+          >
+            <MapPin className="w-3.5 h-3.5" />
+            Google Maps
+          </a>
+          <a
+            href={links.waze}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="action-link inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs tracking-wide transition hover:bg-amber-50 active:scale-95 shadow-sm font-semibold"
+            style={{ borderColor: "rgba(196,157,96,0.3)", color: "#4a1228", background: "rgba(255,255,255,0.7)" }}
+          >
+            <Navigation className="w-3.5 h-3.5" />
+            Waze
+          </a>
+        </motion.div>
       </div>
     </AnimatedSection>
   );
@@ -481,8 +793,17 @@ function DetailsSection() {
 // ─── Countdown Section ────────────────────────────────────────────────────────
 function CountdownSection() {
   const [time, setTime] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+  const [mounted, setMounted] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
 
   useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setVisible(true); },
+      { threshold: 0.2 }
+    );
+    if (ref.current) observer.observe(ref.current);
+
     const update = () => {
       const TARGET = new Date(eventDateTime).getTime();
       const diff = TARGET - Date.now();
@@ -495,41 +816,59 @@ function CountdownSection() {
       });
     };
     update();
+    setMounted(true);
     const id = setInterval(update, 1000);
-    return () => clearInterval(id);
+    return () => { clearInterval(id); observer.disconnect(); };
   }, []);
 
   const units = [
-    { label: "Hari", value: time.days },
-    { label: "Jam", value: time.hours },
-    { label: "Minit", value: time.minutes },
-    { label: "Saat", value: time.seconds },
+    { label: "Hari", value: time.days, key: "d" },
+    { label: "Jam", value: time.hours, key: "h" },
+    { label: "Minit", value: time.minutes, key: "m" },
+    { label: "Saat", value: time.seconds, key: "s" },
   ];
 
   return (
     <AnimatedSection className="invitation-section px-6 py-10 text-center">
-      <p className="section-kicker font-montserrat text-xs tracking-widest uppercase font-semibold mb-2" style={{ color: "#4a1228" }}>
-        Menghitung Hari
-      </p>
-      <p className="font-greatvibes text-3xl mb-6" style={{ color: "#8d5267" }}>
-        Menanti Hari Bahagia
-      </p>
+      <div ref={ref}>
+        <motion.p
+          className="section-kicker font-montserrat text-xs tracking-widest uppercase font-semibold mb-2"
+          style={{ color: "#4a1228" }}
+          initial={{ opacity: 0 }}
+          animate={visible ? { opacity: 1 } : {}}
+          transition={{ duration: 0.6 }}
+        >
+          Menghitung Hari
+        </motion.p>
+        <motion.p
+          className="font-greatvibes text-3xl mb-6"
+          style={{ color: "#8d5267" }}
+          initial={{ opacity: 0, y: 10 }}
+          animate={visible ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.6, delay: 0.1 }}
+        >
+          Menanti Hari Bahagia
+        </motion.p>
 
-      <div className="countdown-grid grid grid-cols-4 gap-2.5">
-        {units.map(({ label, value }) => (
-          <div
-            key={label}
-            className="countdown-card rounded-xl py-3 px-1 flex flex-col items-center shadow-sm"
-            style={{ background: "rgba(255, 255, 255, 0.75)", border: "1px solid rgba(196,157,96,0.15)" }}
-          >
-            <span className="countdown-number font-playfair text-2xl font-bold leading-none" style={{ color: "#4a1228" }}>
-              {formatTwoDigits(value)}
-            </span>
-            <span className="countdown-label font-montserrat text-[9px] tracking-widest uppercase mt-2 font-semibold" style={{ color: "#8d5267" }}>
-              {label}
-            </span>
-          </div>
-        ))}
+        <div className="countdown-grid grid grid-cols-4 gap-2.5">
+          {units.map(({ label, value, key }, idx) => (
+            <motion.div
+              key={label}
+              className={`countdown-card rounded-xl py-3 px-1 flex flex-col items-center shadow-sm ${key === "s" ? "seconds-pulse" : ""}`}
+              style={{ background: "rgba(255, 255, 255, 0.75)", border: "1px solid rgba(196,157,96,0.15)" }}
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={visible ? { opacity: 1, scale: 1 } : {}}
+              transition={{ duration: 0.5, delay: 0.2 + idx * 0.1, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <span className="countdown-number font-playfair text-2xl font-bold leading-none" style={{ color: "#4a1228" }}>
+                {formatTwoDigits(value)}
+              </span>
+              <span className="countdown-label font-montserrat text-[9px] tracking-widest uppercase mt-2 font-semibold" style={{ color: "#8d5267" }}>
+                {label}
+              </span>
+            </motion.div>
+          ))}
+        </div>
       </div>
     </AnimatedSection>
   );
@@ -537,6 +876,18 @@ function CountdownSection() {
 
 // ─── Atur Cara Section ────────────────────────────────────────────────────────
 function AturCaraSection() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setVisible(true); },
+      { threshold: 0.2 }
+    );
+    if (ref.current) observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, []);
+
   const events = [
     { time: "12:00", label: "Ketibaan Tetamu" },
     { time: "12:30", label: "Ketibaan Pengantin" },
@@ -550,14 +901,28 @@ function AturCaraSection() {
       <p className="section-kicker font-montserrat text-xs tracking-widest uppercase font-semibold mb-6 text-center" style={{ color: "#4a1228" }}>
         Atur Cara
       </p>
-      <div className="timeline-list space-y-5 relative max-w-xs mx-auto">
-        <div className="timeline-line absolute left-[4.5rem] top-2 bottom-2 w-px" style={{ background: "linear-gradient(to bottom, transparent, rgba(196,157,96,0.3), transparent)" }} />
-        {events.map(({ time, label }) => (
-          <div key={time} className="flex items-center gap-4">
+      <div ref={ref} className="timeline-list space-y-5 relative max-w-xs mx-auto">
+        {/* Animated timeline line */}
+        <div
+          className={`timeline-line absolute left-[4.5rem] top-2 bottom-2 w-px ${visible ? "timeline-line-draw" : ""}`}
+          style={{
+            background: "linear-gradient(to bottom, transparent, rgba(196,157,96,0.3), transparent)",
+            transformOrigin: "top",
+            transform: visible ? undefined : "scaleY(0)",
+          }}
+        />
+        {events.map(({ time, label }, idx) => (
+          <motion.div
+            key={time}
+            className="flex items-center gap-4"
+            initial={{ opacity: 0, x: -20 }}
+            animate={visible ? { opacity: 1, x: 0 } : {}}
+            transition={{ duration: 0.5, delay: idx * 0.15, ease: [0.22, 1, 0.36, 1] }}
+          >
             <p className="timeline-time font-montserrat text-[10px] font-semibold w-16 text-right shrink-0" style={{ color: "#b8894a" }}>{time}</p>
             <div className="w-2 h-2 rounded-full shrink-0 z-10" style={{ background: "#b8894a" }} />
             <p className="timeline-text font-playfair text-xs font-semibold" style={{ color: "#3d0e20" }}>{label}</p>
-          </div>
+          </motion.div>
         ))}
       </div>
     </AnimatedSection>
@@ -617,7 +982,7 @@ function HorizontalImageStack() {
           return (
             <motion.div
               key={image.src}
-              className="gallery-deck-card"
+              className={`gallery-deck-card ${isActive ? "gallery-active-glow gallery-ken-burns" : ""}`}
               aria-hidden={!isActive}
               animate={{ x, scale, opacity, rotateY, zIndex }}
               transition={reduceMotion ? { duration: 0.05 } : { type: "spring", stiffness: 260, damping: 30, mass: 0.85 }}
@@ -689,7 +1054,7 @@ function DoaSection() {
   return (
     <AnimatedSection className="invitation-section px-6 py-10 text-center">
       <p className="section-kicker font-montserrat text-xs tracking-widest uppercase font-semibold mb-4" style={{ color: "#4a1228" }}>
-        Doa &amp; Harapan
+        Doa <AestheticAmpersand /> Harapan
       </p>
       <OrnamentDivider />
       <p className="doa-copy font-playfair text-xs leading-7 mt-6 italic" style={{ color: "#3d0e20" }}>
@@ -709,8 +1074,10 @@ function DoaSection() {
 function SheetContent({
   active,
   musicState,
+  musicProgress,
   onMusicPlay,
   onMusicPause,
+  onMusicSeek,
   rsvpForm,
   rsvpStatus,
   rsvpStatusIsError,
@@ -720,9 +1087,11 @@ function SheetContent({
   wishes,
 }: {
   active: DockPanel;
-  musicState: YouTubePlaybackState;
+  musicState: AudioPlaybackState;
+  musicProgress: AudioProgress;
   onMusicPlay: () => void;
   onMusicPause: () => void;
+  onMusicSeek: (seconds: number) => void;
   rsvpForm: RsvpFormState;
   rsvpStatus: string;
   rsvpStatusIsError: boolean;
@@ -771,7 +1140,9 @@ function SheetContent({
     return (
       <div className="space-y-4">
         <div className="p-3 rounded-xl border border-amber-500/10 bg-[#842944]/5">
-          <strong className="block text-sm text-[#4a1228] font-bold">{eventDetails.venueName}</strong>
+          <strong className="block text-sm text-[#4a1228] font-bold">
+            <TextWithAmpersands text={eventDetails.venueName} />
+          </strong>
           <p className="text-xs text-gray-500 mt-1 leading-5">{eventDetails.venueAddress}</p>
         </div>
         <div className="grid grid-cols-2 gap-2">
@@ -910,6 +1281,16 @@ function SheetContent({
           <strong className="block text-base text-[#4a1228] font-bold">{giftDetails.title}</strong>
           <span className="text-xs text-gray-500 mt-1">{giftDetails.recipient}</span>
         </div>
+        <figure className="gift-qr-block">
+          <img
+            src="/gift-duitnow-qr.jpeg"
+            alt="DuitNow QR code for Fatin Nashuha Binti Jeffri"
+            className="gift-qr-image"
+            loading="lazy"
+            decoding="async"
+          />
+          <figcaption className="font-montserrat">Scan QR DuitNow</figcaption>
+        </figure>
         <div className="p-3 rounded-xl border bg-white shadow-sm text-xs">
           <span className="block text-gray-400 font-semibold mb-1">Bank / DuitNow</span>
           <strong className="text-sm text-[#4a1228] font-bold">{giftDetails.bank}</strong>
@@ -964,39 +1345,71 @@ function SheetContent({
     );
   }
 
-  const musicLabels: Record<YouTubePlaybackState, string> = {
-    invalid: "Pautan YouTube tidak sah.",
-    loading: "Memuatkan pemain...",
+  const musicLabels: Record<AudioPlaybackState, string> = {
+    loading: "Memuatkan muzik...",
     ready: "Pemain sedia.",
     playing: "Lagu sedang dimainkan.",
     paused: "Lagu dijeda.",
     blocked: "Autoplay disekat. Tekan Play untuk memulakan lagu.",
     ended: "Lagu telah tamat.",
-    error: "Pemain YouTube tidak dapat dimuatkan.",
+    error: "Muzik tidak dapat dimuatkan.",
   };
 
+  const duration = Math.max(0, musicProgress.duration);
+  const currentTime = Math.min(Math.max(0, musicProgress.currentTime), duration || musicProgress.currentTime);
+  const musicUnavailable = musicState === "loading" || musicState === "error";
+
   return (
-    <div className="flex flex-col items-center gap-4 text-center">
-      <Music className="w-8 h-8 text-[#842944] animate-bounce" />
-      <p className="text-xs text-gray-500 leading-relaxed font-semibold">{musicLabels[musicState]}</p>
-      {musicState === "playing" ? (
+    <div className="music-player-panel text-center">
+      <div className={`music-artwork ${musicState === "playing" ? "is-playing" : ""}`} aria-hidden="true">
+        {musicState === "playing" ? (
+          <span className="music-visualizer">
+            {[0, 1, 2, 3].map((bar) => <span key={bar} className="music-bar" />)}
+          </span>
+        ) : (
+          <Music className="h-6 w-6" />
+        )}
+      </div>
+
+      <div>
+        <h3 className="music-track-title font-playfair">{musicTitle}</h3>
+        <p className="music-track-artist font-montserrat">
+          <TextWithAmpersands text={musicArtist} />
+        </p>
+      </div>
+
+      <div className="music-progress-group">
+        <input
+          type="range"
+          min={0}
+          max={duration || 1}
+          step={0.5}
+          value={duration ? currentTime : 0}
+          disabled={!duration}
+          onChange={(event) => onMusicSeek(Number(event.target.value))}
+          className="music-progress-slider"
+          aria-label="Music progress"
+          style={{ "--music-progress": `${duration ? (currentTime / duration) * 100 : 0}%` } as React.CSSProperties}
+        />
+        <div className="music-time-row font-montserrat">
+          <span>{formatMusicTime(currentTime)}</span>
+          <span>{formatMusicTime(duration)}</span>
+        </div>
+      </div>
+
+      <div className="music-control-row">
         <button
           type="button"
-          onClick={onMusicPause}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-[#842944] text-[#fff4d6] active:scale-95 transition"
+          disabled={musicUnavailable}
+          onClick={musicState === "playing" ? onMusicPause : onMusicPlay}
+          className="music-play-button"
+          aria-label={musicState === "playing" ? "Pause music" : "Play music"}
+          title={musicState === "playing" ? "Pause music" : "Play music"}
         >
-          <Pause className="w-3.5 h-3.5" /> Pause
+          {musicState === "playing" ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
         </button>
-      ) : (
-        <button
-          type="button"
-          disabled={musicState === "invalid" || musicState === "loading" || musicState === "error"}
-          onClick={onMusicPlay}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-[#842944] text-[#fff4d6] disabled:opacity-50 active:scale-95 transition"
-        >
-          <Play className="w-3.5 h-3.5" /> Play
-        </button>
-      )}
+        <p className="music-status font-montserrat" role="status">{musicLabels[musicState]}</p>
+      </div>
     </div>
   );
 }
@@ -1005,14 +1418,15 @@ function SheetContent({
 export default function App() {
   const [hasEntered, setHasEntered] = useState(false);
   const [active, setActive] = useState<DockPanel | null>(null);
-  const [musicState, setMusicState] = useState<YouTubePlaybackState>("loading");
+  const [musicState, setMusicState] = useState<AudioPlaybackState>("loading");
+  const [musicProgress, setMusicProgress] = useState<AudioProgress>({ currentTime: 0, duration: 0, buffered: 0 });
   const [wishes, setWishes] = useState<RsvpSubmission[]>(seedWishes);
   const [rsvpForm, setRsvpForm] = useState<RsvpFormState>(initialForm);
   const [rsvpStatus, setRsvpStatus] = useState("");
   const [rsvpStatusIsError, setRsvpStatusIsError] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const playerRef = useRef<YouTubeControllerHandle>(null);
+  const playerRef = useRef<AudioControllerHandle>(null);
   const validMusic = true;
 
   const closeSheet = () => setActive(null);
@@ -1071,13 +1485,13 @@ export default function App() {
     <div className="invitation-root relative min-h-screen font-montserrat">
       <style>{fontStyle}</style>
 
-      {/* Hidden persistent youtube player */}
-      <PersistentYouTubePlayer
+      {/* Hidden persistent audio player */}
+      <PersistentAudioPlayer
         ref={playerRef}
-        youtubeUrl={musicUrl}
+        src={musicSrc}
         startAt={musicStartAt}
-        endAt=""
         onStateChange={setMusicState}
+        onProgressChange={setMusicProgress}
       />
 
       {/* Entrance screen */}
@@ -1132,7 +1546,7 @@ export default function App() {
 
               {/* Closing Section */}
               <div
-                className="relative py-16 px-6 text-center flex flex-col justify-end"
+                className="relative py-16 px-6 text-center flex flex-col justify-end overflow-hidden"
                 style={{
                   backgroundImage: "url('/Background Last page.png')",
                   backgroundSize: "cover",
@@ -1141,34 +1555,76 @@ export default function App() {
                 }}
               >
                 <div className="absolute inset-0 bg-white/10 z-0 pointer-events-none" />
+
+                {/* Floating hearts */}
+                {[...Array(6)].map((_, i) => (
+                  <div key={i} className="floating-heart">
+                    <Heart className="w-4 h-4" fill="currentColor" />
+                  </div>
+                ))}
+
                 <div className="closing-composition relative z-10 mx-auto mb-14 flex w-full max-w-sm flex-col items-center text-center">
-                  <p className="closing-eyebrow font-montserrat">Kehadiran Anda Amat Bermakna</p>
-                  <h2 className="closing-title font-playfair">RSVP &amp; Gift</h2>
-                  <p className="closing-copy font-playfair">
+                  <motion.p
+                    className="closing-eyebrow font-montserrat"
+                    initial={{ opacity: 0, y: 20 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.5 }}
+                    transition={{ duration: 0.7 }}
+                  >
+                    Kehadiran Anda Amat Bermakna
+                  </motion.p>
+                  <motion.h2
+                    className="closing-title font-playfair"
+                    initial={{ opacity: 0, scale: 0.85, filter: "blur(8px)" }}
+                    whileInView={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+                    viewport={{ once: true, amount: 0.5 }}
+                    transition={{ duration: 0.9, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    RSVP <AestheticAmpersand /> Gift
+                  </motion.h2>
+                  <motion.p
+                    className="closing-copy font-playfair"
+                    initial={{ opacity: 0, y: 15 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.5 }}
+                    transition={{ duration: 0.6, delay: 0.3 }}
+                  >
                     Sahkan kehadiran dan tinggalkan ucapan. Ucapan terbaru akan dipaparkan di kad ini dan disimpan ke Excel.
-                  </p>
-                  <div className="closing-button-row">
+                  </motion.p>
+                  <motion.div
+                    className="closing-button-row"
+                    initial={{ opacity: 0, y: 20 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.5 }}
+                    transition={{ duration: 0.6, delay: 0.45 }}
+                  >
                     <button
                       type="button"
                       onClick={() => openSheet("rsvp")}
-                      className="closing-pill-button"
+                      className="closing-pill-button cta-glow"
                     >
                       <Mail className="h-4 w-4" /> RSVP
                     </button>
                     <button
                       type="button"
                       onClick={() => openSheet("gift")}
-                      className="closing-pill-button"
+                      className="closing-pill-button cta-glow"
                     >
                       <Gift className="h-4 w-4" /> GIFT
                     </button>
-                  </div>
+                  </motion.div>
                 </div>
 
-                <div className="relative z-10 pt-10 pb-6 text-center border-t border-amber-500/10">
-                  <p className="font-greatvibes text-3xl" style={{ color: "#4a1228" }}>Nashuha &amp; Shafiq</p>
+                <motion.div
+                  className="relative z-10 pt-10 pb-6 text-center border-t border-amber-500/10"
+                  initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                  whileInView={{ opacity: 1, y: 0, scale: 1 }}
+                  viewport={{ once: true, amount: 0.5 }}
+                  transition={{ duration: 0.8, delay: 0.2 }}
+                >
+                  <p className="font-greatvibes text-3xl shimmer-text">Nashuha <AestheticAmpersand /> Shafiq</p>
                   <p className="font-montserrat text-[10px] tracking-[0.2em] uppercase font-semibold text-gray-500 mt-2">22 Ogos 2026</p>
-                </div>
+                </motion.div>
               </div>
             </div>
 
@@ -1195,9 +1651,8 @@ export default function App() {
                     <div className="w-12 h-1 bg-amber-500/20 rounded-full mx-auto mb-4" />
                     <div className="flex justify-between items-center mb-5">
                       <div>
-                        <small className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Jemputan</small>
                         <h2 className="text-xl font-bold font-playfair text-[#4a1228]">
-                          {active === "time" && "Tarikh & Masa"}
+                          {active === "time" && <>Tarikh <AestheticAmpersand /> Masa</>}
                           {active === "location" && "Lokasi Majlis"}
                           {active === "rsvp" && "Sahkan RSVP"}
                           {active === "gift" && "Hadiah Digital"}
@@ -1216,8 +1671,10 @@ export default function App() {
                     <SheetContent
                       active={active}
                       musicState={musicState}
+                      musicProgress={musicProgress}
                       onMusicPlay={() => playerRef.current?.play()}
                       onMusicPause={() => playerRef.current?.pause()}
+                      onMusicSeek={(seconds) => playerRef.current?.seek(seconds)}
                       rsvpForm={rsvpForm}
                       rsvpStatus={rsvpStatus}
                       rsvpStatusIsError={rsvpStatusIsError}
@@ -1236,6 +1693,8 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => openSheet("music")}
+                aria-label={musicState === "playing" ? "Open music player, currently playing" : "Open music player"}
+                title="Music player"
                 className={`music-dock fixed right-4 bottom-20 z-40 w-12 h-12 rounded-full flex items-center justify-center bg-[#842944] text-[#fff4d6] shadow-lg border border-amber-500/20 transition-all hover:scale-105 active:scale-95 ${
                   active === "music" ? "ring-2 ring-[#fff4d6]" : ""
                 }`}
@@ -1252,13 +1711,16 @@ export default function App() {
             )}
 
             {/* Fixed bottom navigation dock (Apple-like) */}
-            <nav
+            <motion.nav
               className="invitation-dock fixed bottom-3 inset-x-4 z-40 mx-auto max-w-md grid grid-cols-5 gap-1.5 p-2 rounded-full shadow-2xl backdrop-blur-xl border"
               style={{
                 background: "rgba(132, 41, 68, 0.95)",
                 borderColor: "rgba(255, 244, 217, 0.2)",
                 color: "#fff4d6"
               }}
+              initial={{ y: 80, opacity: 0, filter: "blur(10px)" }}
+              animate={{ y: 0, opacity: 1, filter: "blur(0px)" }}
+              transition={{ duration: 0.6, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
             >
               {[
                 { panel: "time", icon: Clock, label: "Masa" },
@@ -1267,18 +1729,21 @@ export default function App() {
                 { panel: "gift", icon: Gift, label: "Gift" },
                 { panel: "contact", icon: Phone, label: "Hubungi" }
               ].map(({ panel, icon: Icon, label }) => (
-                <button
+                <motion.button
                   key={panel}
                   onClick={() => openSheet(panel as DockPanel)}
                   className={`flex flex-col items-center justify-center py-1.5 rounded-full transition-all active:scale-90 ${
                     active === panel ? "bg-amber-500/25 border border-amber-500/25 text-[#fff4d6] font-semibold" : "text-amber-100/70 hover:text-white"
                   }`}
+                  whileTap={{ scale: 0.85 }}
+                  animate={active === panel ? { y: [0, -4, 0] } : { y: 0 }}
+                  transition={active === panel ? { duration: 0.4, ease: "easeOut" } : { duration: 0.2 }}
                 >
                   <Icon className="w-4 h-4 mb-0.5" />
                   <span className="text-[9px] tracking-wide uppercase font-semibold">{label}</span>
-                </button>
+                </motion.button>
               ))}
-            </nav>
+            </motion.nav>
 
           </motion.div>
         )}
