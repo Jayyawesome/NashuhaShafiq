@@ -62,7 +62,6 @@ const fontStyle = `
 `;
 
 type DockPanel = "time" | "location" | "rsvp" | "gift" | "contact" | "music";
-type CountdownParts = { days: number; hours: number; minutes: number; seconds: number };
 type RsvpFormState = { name: string; attendance: AttendanceStatus; pax: number; phone: string; wish: string };
 type RsvpApiResponse = { submissions: RsvpSubmission[]; workbook: string };
 
@@ -187,17 +186,6 @@ function mapLinks() {
   };
 }
 
-function getCountdownParts(): CountdownParts {
-  const remaining = Math.max(0, new Date(eventDateTime).getTime() - Date.now());
-  const secondsTotal = Math.floor(remaining / 1000);
-  return {
-    days: Math.floor(secondsTotal / 86400),
-    hours: Math.floor((secondsTotal % 86400) / 3600),
-    minutes: Math.floor((secondsTotal % 3600) / 60),
-    seconds: secondsTotal % 60,
-  };
-}
-
 function formatTwoDigits(value: number) {
   return String(value).padStart(2, "0");
 }
@@ -210,7 +198,7 @@ function Sparkle({ x, y, delay }: { x: number; y: number; delay: number }) {
       style={{ left: `${x}%`, top: `${y}%` }}
       initial={{ opacity: 0, scale: 0 }}
       animate={{ opacity: [0, 1, 0], scale: [0, 1, 0] }}
-      transition={{ duration: 2.5, delay, repeat: Infinity, repeatDelay: Math.random() * 4 + 2 }}
+      transition={{ duration: 2.5, delay, repeat: Infinity, repeatDelay: 2 + (delay * 1.7) % 4 }}
     >
       <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
         <path d="M6 0L7 5L12 6L7 7L6 12L5 7L0 6L5 5L6 0Z" fill="#b8894a" opacity="0.6" />
@@ -285,9 +273,9 @@ function EntranceScreen({
   const particles = useMemo(() =>
     Array.from({ length: 8 }, (_, i) => ({
       left: `${12 + i * 11}%`,
-      size: 3 + Math.random() * 3,
+      size: 3 + (i % 4) * 0.75,
       delay: i * 0.6,
-      duration: 3 + Math.random() * 2,
+      duration: 3 + (i % 5) * 0.4,
     })), []);
 
   return (
@@ -412,8 +400,8 @@ function CoverPage() {
   const petals = useMemo(() =>
     Array.from({ length: 12 }, (_, i) => ({
       left: `${5 + (i * 8) % 90}%`,
-      size: 10 + Math.random() * 8,
-      duration: 6 + Math.random() * 6,
+      size: 10 + (i % 5) * 1.6,
+      duration: 6 + (i % 6),
       delay: i * 0.8,
     })), []);
 
@@ -455,7 +443,7 @@ function CoverPage() {
 }
 
 // ─── Mukadimah Section ────────────────────────────────────────────────────────
-function MukadimahSection() {
+export function MukadimahSection() {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
 
@@ -799,7 +787,6 @@ function DetailsSection() {
 // ─── Countdown Section ────────────────────────────────────────────────────────
 function CountdownSection() {
   const [time, setTime] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
-  const [mounted, setMounted] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
 
@@ -822,7 +809,6 @@ function CountdownSection() {
       });
     };
     update();
-    setMounted(true);
     const id = setInterval(update, 1000);
     return () => { clearInterval(id); observer.disconnect(); };
   }, []);

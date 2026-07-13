@@ -86,7 +86,8 @@ function PersistentAudioPlayerImpl(
 
   useEffect(() => {
     initialSeekAppliedRef.current = false;
-  }, [src, startAt]);
+    seekToConfiguredStart();
+  }, [src, startAt, seekToConfiguredStart]);
 
   return (
     <audio

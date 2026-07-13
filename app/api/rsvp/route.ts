@@ -1,47 +1,49 @@
-import express from "express";
-import fs from "node:fs";
+import * as fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import XLSX from "xlsx";
+import { NextResponse } from "next/server";
+import * as XLSX from "xlsx";
 
-const app = express();
-const port = Number(process.env.PORT || 3001);
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(__dirname, "..");
-const dataDir = path.join(projectRoot, "data");
-const workbookPath = path.join(dataDir, "shua-rsvp.xlsx");
-const publicWorkbookPath = "data/shua-rsvp.xlsx";
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+XLSX.set_fs(fs);
+
 const sheetName = "RSVP Responses";
+const publicWorkbookPath = "data/shua-rsvp.xlsx";
 const headers = ["Timestamp", "Name", "Attendance", "Pax", "Phone", "Wish", "Source"];
 const attendanceOptions = new Set(["Hadir", "Tidak Hadir", "Mungkin"]);
+const dataDir = process.env.VERCEL
+  ? path.join(os.tmpdir(), "nashuha-shafiq")
+  : path.join(process.cwd(), "data");
+const workbookPath = path.join(dataDir, "shua-rsvp.xlsx");
+const noStoreHeaders = { "Cache-Control": "no-store" };
+
+type Submission = {
+  timestamp: string;
+  name: string;
+  attendance: string;
+  pax: number;
+  phone: string;
+  wish: string;
+  source: string;
+};
 
 let writeQueue = Promise.resolve();
 
-app.use(express.json({ limit: "16kb" }));
-app.use("/api", (_req, res, next) => {
-  res.set("Cache-Control", "no-store");
-  next();
-});
-
-function cleanString(value, maxLength, label, required = false) {
+function cleanString(value: unknown, maxLength: number, label: string, required = false) {
   const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
-  if (required && normalized.length === 0) {
-    throw new Error(`${label} diperlukan.`);
-  }
-  if (normalized.length > maxLength) {
-    throw new Error(`${label} mesti ${maxLength} aksara atau kurang.`);
-  }
+  if (required && normalized.length === 0) throw new Error(`${label} diperlukan.`);
+  if (normalized.length > maxLength) throw new Error(`${label} mesti ${maxLength} aksara atau kurang.`);
   return normalized;
 }
 
-function normalizeSubmissionInput(body) {
+function normalizeSubmissionInput(body: Record<string, unknown>): Submission {
   const name = cleanString(body.name, 80, "Nama", true);
   const phone = cleanString(body.phone, 30, "No telefon");
   const wish = cleanString(body.wish, 240, "Ucapan");
   const attendance = cleanString(body.attendance, 20, "Kehadiran", true);
-  if (!attendanceOptions.has(attendance)) {
-    throw new Error("Pilihan kehadiran tidak sah.");
-  }
+  if (!attendanceOptions.has(attendance)) throw new Error("Pilihan kehadiran tidak sah.");
 
   const pax = Number(body.pax);
   if (!Number.isInteger(pax) || pax < 1 || pax > 10) {
@@ -59,26 +61,23 @@ function normalizeSubmissionInput(body) {
   };
 }
 
-function toWorkbookCell(value) {
+function toWorkbookCell(value: unknown) {
   const text = String(value ?? "");
   return /^[=+\-@]/.test(text) ? `'${text}` : text;
 }
 
-function fromWorkbookCell(value) {
+function fromWorkbookCell(value: unknown) {
   const text = String(value ?? "");
   return /^'[=+\-@]/.test(text) ? text.slice(1) : text;
 }
 
-function ensureDataDir() {
-  fs.mkdirSync(dataDir, { recursive: true });
-}
-
-function readSubmissionsFromWorkbook() {
+function readSubmissionsFromWorkbook(): Submission[] {
   if (!fs.existsSync(workbookPath)) return [];
   const workbook = XLSX.readFile(workbookPath, { cellDates: false });
   const worksheet = workbook.Sheets[sheetName];
   if (!worksheet) return [];
-  const rows = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "" });
   return rows.map((row) => ({
     timestamp: fromWorkbookCell(row.Timestamp),
     name: fromWorkbookCell(row.Name),
@@ -90,8 +89,8 @@ function readSubmissionsFromWorkbook() {
   }));
 }
 
-function writeSubmissionsToWorkbook(submissions) {
-  ensureDataDir();
+function writeSubmissionsToWorkbook(submissions: Submission[]) {
+  fs.mkdirSync(dataDir, { recursive: true });
   const rows = submissions.map((submission) => [
     toWorkbookCell(submission.timestamp),
     toWorkbookCell(submission.name),
@@ -107,50 +106,50 @@ function writeSubmissionsToWorkbook(submissions) {
   XLSX.writeFile(workbook, workbookPath);
 }
 
-function recentFirst(submissions) {
+function recentFirst(submissions: Submission[]) {
   return [...submissions].reverse().slice(0, 20);
 }
 
-function enqueueWrite(task) {
+function enqueueWrite<T>(task: () => T | Promise<T>) {
   const run = writeQueue.then(task, task);
   writeQueue = run.then(() => undefined, () => undefined);
   return run;
 }
 
-app.get("/api/rsvp", (_req, res) => {
-  const submissions = readSubmissionsFromWorkbook();
-  res.json({ submissions: recentFirst(submissions), workbook: publicWorkbookPath });
-});
-
-app.post("/api/rsvp", async (req, res) => {
+export async function GET() {
   try {
-    const submission = normalizeSubmissionInput(req.body ?? {});
+    const submissions = readSubmissionsFromWorkbook();
+    return NextResponse.json(
+      { submissions: recentFirst(submissions), workbook: publicWorkbookPath },
+      { headers: noStoreHeaders },
+    );
+  } catch {
+    return NextResponse.json(
+      { error: "Senarai RSVP tidak dapat dibaca." },
+      { status: 500, headers: noStoreHeaders },
+    );
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const body = (await request.json()) as Record<string, unknown>;
+    const submission = normalizeSubmissionInput(body);
     const result = await enqueueWrite(() => {
       const submissions = readSubmissionsFromWorkbook();
       submissions.push(submission);
       writeSubmissionsToWorkbook(submissions);
-      return { submission, submissions: recentFirst(submissions), workbook: publicWorkbookPath };
+      return {
+        submission,
+        submissions: recentFirst(submissions),
+        workbook: publicWorkbookPath,
+      };
     });
-    res.status(201).json(result);
+    return NextResponse.json(result, { status: 201, headers: noStoreHeaders });
   } catch (error) {
-    res.status(400).json({
-      error: error instanceof Error ? error.message : "RSVP tidak dapat dihantar.",
-    });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "RSVP tidak dapat dihantar." },
+      { status: 400, headers: noStoreHeaders },
+    );
   }
-});
-
-const distDir = path.join(projectRoot, "dist");
-app.use(express.static(distDir));
-
-app.get(/^(?!\/api).*/, (_req, res) => {
-  const indexPath = path.join(distDir, "index.html");
-  if (!fs.existsSync(indexPath)) {
-    res.status(404).send("Build output not found. Run npm run build first.");
-    return;
-  }
-  res.sendFile(indexPath);
-});
-
-app.listen(port, "127.0.0.1", () => {
-  console.log(`Shua RSVP server running at http://127.0.0.1:${port}`);
-});
+}
