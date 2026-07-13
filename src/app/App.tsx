@@ -24,7 +24,8 @@ import type { AttendanceStatus, RsvpSubmission } from "../lib/rsvp";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const musicSrc = "/lagu-pernikahan-kita.mp3";
-const musicStartAt = 113;
+const musicStartAt = 0;
+const musicTimelineOffset = 113;
 const musicTitle = "Lagu Pernikahan Kita";
 const musicArtist = "Tiara Andini & Arsy Widianto";
 const eventDateTime = "2026-08-22T12:00:00+08:00";
@@ -266,7 +267,7 @@ function EntranceScreen({
     onActivate();
     setOpening(true);
     onEnter();
-    window.setTimeout(onFinish, reduceMotion ? 320 : 1200);
+    window.setTimeout(onFinish, reduceMotion ? 950 : 1450);
   };
 
   // Floating gold particles for entrance
@@ -282,13 +283,19 @@ function EntranceScreen({
     <motion.div
       className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden"
       animate={opening ? { opacity: 0 } : { opacity: 1 }}
-      transition={{ duration: reduceMotion ? 0.2 : 0.42, delay: opening && !reduceMotion ? 0.76 : 0 }}
+      transition={{
+        duration: reduceMotion ? 0.18 : 0.42,
+        delay: opening ? (reduceMotion ? 0.62 : 0.92) : 0,
+      }}
     >
       <motion.div
         className="opening-gate-panel opening-gate-panel-left absolute inset-y-0 left-0 w-1/2 origin-left overflow-hidden"
-        style={{ borderRight: "1px solid rgba(196, 157, 96, 0.3)" }}
         animate={opening ? { x: "-100%" } : { x: 0 }}
-        transition={{ duration: reduceMotion ? 0.26 : 0.9, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: reduceMotion ? 0.72 : 1.05, ease: [0.22, 1, 0.36, 1] }}
+        style={{
+          borderRight: "1px solid rgba(196, 157, 96, 0.3)",
+          willChange: "transform",
+        }}
       >
         <div className="absolute inset-y-0 left-0 w-[200%]" style={{
           backgroundImage: "url('/Opening Gate Background.png')",
@@ -302,9 +309,12 @@ function EntranceScreen({
 
       <motion.div
         className="opening-gate-panel opening-gate-panel-right absolute inset-y-0 right-0 w-1/2 origin-right overflow-hidden"
-        style={{ borderLeft: "1px solid rgba(255, 255, 255, 0.15)" }}
         animate={opening ? { x: "100%" } : { x: 0 }}
-        transition={{ duration: reduceMotion ? 0.26 : 0.9, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: reduceMotion ? 0.72 : 1.05, ease: [0.22, 1, 0.36, 1] }}
+        style={{
+          borderLeft: "1px solid rgba(255, 255, 255, 0.15)",
+          willChange: "transform",
+        }}
       >
         <div className="absolute inset-y-0 right-0 w-[200%]" style={{
           backgroundImage: "url('/Opening Gate Background.png')",
@@ -1384,8 +1394,8 @@ function SheetContent({
           style={{ "--music-progress": `${duration ? (currentTime / duration) * 100 : 0}%` } as React.CSSProperties}
         />
         <div className="music-time-row font-montserrat">
-          <span>{formatMusicTime(currentTime)}</span>
-          <span>{formatMusicTime(duration)}</span>
+          <span>{formatMusicTime(currentTime + musicTimelineOffset)}</span>
+          <span>{formatMusicTime(duration + musicTimelineOffset)}</span>
         </div>
       </div>
 
