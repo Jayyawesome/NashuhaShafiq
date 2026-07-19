@@ -64,7 +64,7 @@ const fontStyle = `
 
 type DockPanel = "time" | "location" | "rsvp" | "gift" | "contact" | "music";
 type RsvpFormState = { name: string; attendance: AttendanceStatus; pax: number; phone: string; wish: string };
-type RsvpApiResponse = { submissions: RsvpSubmission[]; workbook: string };
+type RsvpApiResponse = { submissions: RsvpSubmission[]; storage: string };
 
 function AestheticAmpersand() {
   return <span className="aesthetic-ampersand">&amp;</span>;
@@ -1469,7 +1469,7 @@ export default function App() {
       const result = await postRsvpSubmission(rsvpForm);
       setWishes(result.submissions.slice(0, 20));
       setRsvpForm(initialForm);
-      setRsvpStatus("Terima kasih. RSVP anda telah disimpan ke Excel.");
+      setRsvpStatus("Terima kasih. RSVP anda telah disimpan dengan selamat.");
     } catch (error) {
       setRsvpStatusIsError(true);
       setRsvpStatus(error instanceof Error ? error.message : "RSVP tidak dapat dihantar.");
@@ -1598,7 +1598,7 @@ export default function App() {
                     viewport={{ once: true, amount: 0.5 }}
                     transition={{ duration: 0.6, delay: 0.3 }}
                   >
-                    Sahkan kehadiran dan tinggalkan ucapan. Ucapan terbaru akan dipaparkan di kad ini dan disimpan ke Excel.
+                    Sahkan kehadiran dan tinggalkan ucapan. Ucapan terbaru akan dipaparkan di kad ini dan disimpan dengan selamat.
                   </motion.p>
                   <motion.div
                     className="closing-button-row"

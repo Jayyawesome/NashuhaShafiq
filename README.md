@@ -18,6 +18,12 @@ npm start
 
 The App Router serves the invitation and the Node.js `/api/rsvp` route from one application.
 
+## RSVP Storage
+
+RSVP responses are stored in the `public.rsvp_submissions` table in the Supabase project `NashuhaShafiq`. View them in the [Supabase Table Editor](https://supabase.com/dashboard/project/xrntfalycrnvanesuzrx/editor).
+
+Create `.env.local` from `.env.example` and provide the project URL and publishable key before running locally. Database changes are recorded in `supabase/migrations/`. Row Level Security prevents guests from updating or deleting responses, and phone numbers are not returned in the public wishes feed.
+
 ## Requirement And Prompts
 
 - [Source requirement document](<Requirement edit for shua card.docx>)
